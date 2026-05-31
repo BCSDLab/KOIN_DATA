@@ -1,0 +1,9 @@
+import os
+
+SECRET_KEY = os.environ.get("SUPERSET_SECRET_KEY", "change_me")
+SQLALCHEMY_DATABASE_URI = os.environ.get("SQLALCHEMY_DATABASE_URI")
+
+FEATURE_FLAGS = {
+    "DASHBOARD_NATIVE_FILTERS": True,
+    "ENABLE_TEMPLATE_PROCESSING": True,
+}

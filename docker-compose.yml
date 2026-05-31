@@ -1,0 +1,107 @@
+name: koin-data
+
+x-airflow-common: &airflow-common
+  image: ${KOIN_DATA_AIRFLOW_IMAGE:-koin-data-airflow:latest}
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
+    DBT_PROFILES_DIR: /opt/airflow/dbt/koin
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/logs:/opt/airflow/logs
+    - ./dbt:/opt/airflow/dbt
+    - ./secrets:/opt/airflow/secrets:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_USER: ${KOIN_DATA_POSTGRES_USER:-koin}
+      POSTGRES_PASSWORD: ${KOIN_DATA_POSTGRES_PASSWORD:-change_me}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KOIN_DATA_POSTGRES_USER:-koin} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -lc "airflow db migrate &&
+      airflow users create
+      --username \"$${AIRFLOW_ADMIN_USERNAME}\"
+      --password \"$${AIRFLOW_ADMIN_PASSWORD}\"
+      --firstname \"$${AIRFLOW_ADMIN_FIRSTNAME}\"
+      --lastname \"$${AIRFLOW_ADMIN_LASTNAME}\"
+      --role Admin
+      --email \"$${AIRFLOW_ADMIN_EMAIL}\" || true"
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+
+  superset:
+    image: ${KOIN_DATA_SUPERSET_IMAGE:-koin-data-superset:latest}
+    build:
+      context: .
+      dockerfile: docker/superset/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_SUPERSET_DB:-superset_metadata}
+    volumes:
+      - ./docker/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./secrets:/app/secrets:ro
+    ports:
+      - "8088:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      bash -lc "superset db upgrade &&
+      superset fab create-admin
+      --username \"$${SUPERSET_ADMIN_USERNAME}\"
+      --firstname \"$${SUPERSET_ADMIN_FIRSTNAME}\"
+      --lastname \"$${SUPERSET_ADMIN_LASTNAME}\"
+      --email \"$${SUPERSET_ADMIN_EMAIL}\"
+      --password \"$${SUPERSET_ADMIN_PASSWORD}\" || true &&
+      superset init &&
+      gunicorn --bind 0.0.0.0:8088 --workers 2 --timeout 120 'superset.app:create_app()'"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
