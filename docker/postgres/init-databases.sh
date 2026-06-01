@@ -7,14 +7,14 @@ create_database() {
   local exists
 
   exists="$(
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres --set=database="$database" \
       --tuples-only --no-align \
-      --command "SELECT 1 FROM pg_database WHERE datname = '${database}'"
+      --command "SELECT 1 FROM pg_database WHERE datname = :'database'"
   )"
 
   if [[ "$exists" != "1" ]]; then
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
-      --command "CREATE DATABASE \"${database}\""
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres --set=database="$database" \
+      --command 'CREATE DATABASE :"database"'
   fi
 }
 

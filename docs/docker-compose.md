@@ -9,12 +9,12 @@ This document summarizes the local Docker Compose setup for the KOIN data platfo
 | `postgres` | Metadata database for Airflow and Superset | Yes |
 | `airflow-webserver` | Airflow 3 API server and UI | Yes |
 | `airflow-scheduler` | DAG scheduling and task dispatching | Yes |
-| `airflow-init` | Airflow metadata migration and admin user creation | No |
+| `airflow-init` | Airflow metadata migration | No |
 | `dbt` | dbt BigQuery command runner | No |
 | `superset` | BI dashboard service | Yes |
 
 dbt is not exposed as a web service.
-It runs as a command-line container with the dbt project mounted at `/usr/app`.
+It runs as a command-line container with the local `dbt/` workspace mounted at `/usr/app`.
 
 ## Ports
 
@@ -64,21 +64,7 @@ KOIN_DATA_SUPERSET_DB=superset_metadata
 ## Analytics Data Storage
 
 Analytics data is expected to live in BigQuery, not in the metadata Postgres container.
-
-| Layer | Environment Variable | Purpose |
-| --- | --- | --- |
-| Raw | `KOIN_DATA_RAW_DATASET` | GA4 export landing dataset |
-| Staging | `KOIN_DATA_STAGING_DATASET` | dbt cleanup and type casting |
-| Bronze | `KOIN_DATA_BRONZE_DATASET` | Canonical event schema |
-| Silver | `KOIN_DATA_SILVER_DATASET` | Entity-level analytical tables |
-| Gold | `KOIN_DATA_GOLD_DATASET` | Superset-facing marts |
-
-This split keeps orchestration metadata and analytics data separate:
-
-```text
-Postgres = Airflow/Superset metadata
-BigQuery = GA4 raw, staging, bronze, silver, gold data
-```
+The initial `dbt/` directory is intentionally empty so project models can be added deliberately later.
 
 ## Local Verification
 

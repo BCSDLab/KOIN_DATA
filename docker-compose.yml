@@ -11,12 +11,10 @@ x-airflow-common: &airflow-common
   environment:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
-    DBT_PROFILES_DIR: /opt/airflow/dbt/koin
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
-    - ./dbt:/opt/airflow/dbt
     - ./secrets:/opt/airflow/secrets:ro
   depends_on:
     postgres:
@@ -71,7 +69,7 @@ services:
         required: false
     working_dir: /usr/app
     volumes:
-      - ./dbt/koin:/usr/app
+      - ./dbt:/usr/app
       - ./secrets:/secrets:ro
     command: ["--version"]
     restart: "no"
