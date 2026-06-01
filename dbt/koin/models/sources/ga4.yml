@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: ga4
+    database: "{{ env_var('KOIN_DATA_GCP_PROJECT') }}"
+    schema: "{{ env_var('KOIN_DATA_RAW_DATASET', 'raw_ga4') }}"
+    tables:
+      - name: events
+        identifier: "{{ env_var('KOIN_DATA_GA4_TABLE_PREFIX', 'events_') }}*"
+        description: Raw GA4 daily export tables in BigQuery.

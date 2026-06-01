@@ -70,3 +70,8 @@ docker compose up -d --build
 - dbt project: `koin`
 - Python, dbt, SQL 식별자: `underscore_case`
 - 환경변수 prefix: `KOIN_DATA_`
+
+## Docker Compose Reference
+
+- [Docker Compose setup](docs/docker-compose.md)
+- [dbt BigQuery setup](docs/dbt-bigquery.md)
