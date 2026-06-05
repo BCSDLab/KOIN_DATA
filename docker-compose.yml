@@ -11,12 +11,10 @@ x-airflow-common: &airflow-common
   environment:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
-    DBT_PROFILES_DIR: /opt/airflow/dbt/koin
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
-    - ./dbt:/opt/airflow/dbt
     - ./secrets:/opt/airflow/secrets:ro
   depends_on:
     postgres:
@@ -44,24 +42,16 @@ services:
 
   airflow-init:
     <<: *airflow-common
-    command: >
-      bash -lc "airflow db migrate &&
-      airflow users create
-      --username \"$${AIRFLOW_ADMIN_USERNAME}\"
-      --password \"$${AIRFLOW_ADMIN_PASSWORD}\"
-      --firstname \"$${AIRFLOW_ADMIN_FIRSTNAME}\"
-      --lastname \"$${AIRFLOW_ADMIN_LASTNAME}\"
-      --role Admin
-      --email \"$${AIRFLOW_ADMIN_EMAIL}\" || true"
+    command: bash -lc "airflow db migrate"
     restart: "no"
 
   airflow-webserver:
     <<: *airflow-common
-    command: webserver
+    command: api-server
     ports:
-      - "8080:8080"
+      - "${KOIN_DATA_AIRFLOW_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -71,6 +61,18 @@ services:
     <<: *airflow-common
     command: scheduler
     restart: unless-stopped
+
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-bigquery:1.9.latest
+    env_file:
+      - path: .env
+        required: false
+    working_dir: /usr/app
+    volumes:
+      - ./dbt:/usr/app
+      - ./secrets:/secrets:ro
+    command: ["--version"]
+    restart: "no"
 
   superset:
     image: ${KOIN_DATA_SUPERSET_IMAGE:-koin-data-superset:latest}
@@ -87,7 +89,7 @@ services:
       - ./docker/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       - ./secrets:/app/secrets:ro
     ports:
-      - "8088:8088"
+      - "${KOIN_DATA_SUPERSET_PORT:-8088}:8088"
     depends_on:
       postgres:
         condition: service_healthy

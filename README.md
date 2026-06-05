@@ -32,8 +32,7 @@ KOIN_DATA/
     plugins/
     logs/
 
-  dbt/
-    koin/          # 초기에는 빈 폴더, 모델은 단계적으로 추가
+  dbt/            # 초기에는 빈 폴더, 모델은 단계적으로 추가
 
   scripts/
   docs/
@@ -67,6 +66,10 @@ docker compose up -d --build
 
 - GitHub repo: `KOIN_DATA`
 - Docker project: `koin-data`
-- dbt project: `koin`
+- dbt workspace: `dbt/`
 - Python, dbt, SQL 식별자: `underscore_case`
 - 환경변수 prefix: `KOIN_DATA_`
+
+## Docker Compose Reference
+
+- [Docker Compose setup](docs/docker-compose.md)
