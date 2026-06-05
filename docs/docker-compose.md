@@ -113,6 +113,7 @@ Airflow 3 uses `airflow api-server` instead of the Airflow 2 `airflow webserver`
 
 dbt is kept in a separate `ghcr.io/dbt-labs/dbt-bigquery:1.9.latest` container.
 This avoids dependency conflicts between Airflow 3.x provider constraints and dbt BigQuery dependencies.
+The dbt service pins `platform: linux/amd64` because the selected dbt image does not publish a native ARM64 image.
 
 For Airflow `3.0.1` and Python `3.11`, the Dockerfile uses:
 

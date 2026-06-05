@@ -64,6 +64,7 @@ services:
 
   dbt:
     image: ghcr.io/dbt-labs/dbt-bigquery:1.9.latest
+    platform: linux/amd64
     env_file:
       - path: .env
         required: false
