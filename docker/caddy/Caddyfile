@@ -1,0 +1,8 @@
+{$KOIN_DATA_SUPERSET_DOMAIN} {
+	encode gzip zstd
+
+	reverse_proxy superset:8088 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+}

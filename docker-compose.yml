@@ -21,6 +21,26 @@ x-airflow-common: &airflow-common
       condition: service_healthy
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      KOIN_DATA_SUPERSET_DOMAIN: ${KOIN_DATA_SUPERSET_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      superset:
+        condition: service_started
+    restart: unless-stopped
+
   postgres:
     image: postgres:16
     env_file:
@@ -49,7 +69,7 @@ services:
     <<: *airflow-common
     command: api-server
     ports:
-      - "${KOIN_DATA_AIRFLOW_PORT:-8080}:8080"
+      - "127.0.0.1:${KOIN_DATA_AIRFLOW_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
       interval: 30s
@@ -90,7 +110,7 @@ services:
       - ./docker/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       - ./secrets:/app/secrets:ro
     ports:
-      - "${KOIN_DATA_SUPERSET_PORT:-8088}:8088"
+      - "127.0.0.1:${KOIN_DATA_SUPERSET_PORT:-8088}:8088"
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,4 +127,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  caddy_config:
+  caddy_data:
   postgres_data:
