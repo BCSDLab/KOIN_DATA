@@ -16,6 +16,7 @@ x-airflow-common: &airflow-common
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
     - ./secrets:/opt/airflow/secrets:ro
+    - ./airflow/passwords.json:/opt/airflow/simple_auth_manager_passwords.json.generated
   depends_on:
     postgres:
       condition: service_healthy
