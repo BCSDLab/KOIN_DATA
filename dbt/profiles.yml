@@ -1,0 +1,22 @@
+koin_data:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+
+    # 로컬 개발 — OAuth(gcloud ADC), 스테이지 프로젝트에 씀
+    dev:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('KOIN_DATA_GCP_PROJECT', 'koin-stage-438512') }}"
+      dataset: silver
+      location: "{{ env_var('KOIN_DATA_BIGQUERY_LOCATION', 'asia-northeast3') }}"
+      threads: 4
+
+    # 서버 운영 — 서비스 계정 키, 운영 프로젝트에 씀
+    prod:
+      type: bigquery
+      method: service-account
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS', '/secrets/gcp-service-account.json') }}"
+      project: "{{ env_var('KOIN_DATA_GCP_PROJECT', 'kap-chat') }}"
+      dataset: silver
+      location: "{{ env_var('KOIN_DATA_BIGQUERY_LOCATION', 'asia-northeast3') }}"
+      threads: 4

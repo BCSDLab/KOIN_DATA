@@ -89,10 +89,14 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      DBT_PROFILES_DIR: /usr/app
     working_dir: /usr/app
     volumes:
       - ./dbt:/usr/app
       - ./secrets:/secrets:ro
+      # 로컬 개발용 OAuth(ADC) 인증 — 서버(prod)는 service-account 키를 쓰므로 무시됨
+      - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
     command: ["--version"]
     restart: "no"
 

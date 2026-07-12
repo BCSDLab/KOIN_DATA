@@ -1,0 +1,23 @@
+name: 'koin_data'
+version: '1.0.0'
+config-version: 2
+
+profile: 'koin_data'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  koin_data:
+    silver:         # Silver 레이어 (정제 + 비즈니스 로직)
+      +materialized: view
+      +schema: silver
+    gold:           # Gold 레이어 (KPI / 대시보드용 집계)
+      +materialized: table
+      +schema: gold
