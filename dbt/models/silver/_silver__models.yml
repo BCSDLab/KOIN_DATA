@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: silver_ga4_events
+    description: >
+      GA4 원본 이벤트를 정제한 silver 레이어. event_params 배열을 컬럼으로 펴고
+      타입을 변환한다. (테스트 버전 — 현재 오늘치만)
+    columns:
+      - name: event_dt
+        description: 이벤트 날짜 (event_date를 DATE로 변환)
+      - name: event_at
+        description: 이벤트 시각 (event_timestamp 마이크로초 → TIMESTAMP)
+      - name: event_name
+        description: GA4 이벤트 이름 (page_view, session_start 등)
+      - name: user_pseudo_id
+        description: GA4가 부여한 익명 유저 ID
+        tests:
+          - not_null
+      - name: page_location
+        description: 이벤트 발생 페이지 URL
