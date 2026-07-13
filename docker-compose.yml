@@ -11,6 +11,8 @@ x-airflow-common: &airflow-common
   environment:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
+    # 프록시(Caddy) 뒤 공개 주소. 로컬은 localhost, 서버는 .env에서 https://airflow.bcsdlab.com 로 override
+    AIRFLOW__API__BASE_URL: ${KOIN_DATA_AIRFLOW_BASE_URL:-http://localhost:8080}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
@@ -29,7 +31,8 @@ services:
         required: false
     environment:
       KOIN_DATA_SUPERSET_DOMAIN: ${KOIN_DATA_SUPERSET_DOMAIN:-localhost}
-      KOIN_DATA_DBT_DOCS_DOMAIN: ${KOIN_DATA_DBT_DOCS_DOMAIN:-localhost}
+      KOIN_DATA_DBT_DOCS_DOMAIN: ${KOIN_DATA_DBT_DOCS_DOMAIN:-dbt.localhost}
+      KOIN_DATA_AIRFLOW_DOMAIN: ${KOIN_DATA_AIRFLOW_DOMAIN:-airflow.localhost}
     ports:
       - "80:80"
       - "443:443"
