@@ -19,3 +19,17 @@
 	root * /srv/dbt-docs
 	file_server
 }
+
+# Airflow (파이프라인 제어). 자체 로그인이 있지만 민감해서 basic_auth 한 겹 더 (이중 방어).
+{$KOIN_DATA_AIRFLOW_DOMAIN} {
+	encode gzip zstd
+
+	basic_auth {
+		admin $2a$14$ZPsoJvFZfpyeYxhFJFxlveDS7slKOlr64FKvU0dj9/pYGEXZeH926
+	}
+
+	reverse_proxy airflow-webserver:8080 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+}
