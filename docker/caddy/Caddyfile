@@ -8,12 +8,12 @@
 }
 
 # dbt docs (정적 파일). Superset과 달리 자체 로그인이 없어서 basic_auth로 막는다.
-# 계정: koin / admin1234  (해시는 `caddy hash-password`로 생성, 평문 아님)
+# 계정: admin / admin1234  (해시는 `caddy hash-password`로 생성, 평문 아님)
 {$KOIN_DATA_DBT_DOCS_DOMAIN} {
 	encode gzip zstd
 
 	basic_auth {
-		koin $2a$14$ZPsoJvFZfpyeYxhFJFxlveDS7slKOlr64FKvU0dj9/pYGEXZeH926
+		admin $2a$14$ZPsoJvFZfpyeYxhFJFxlveDS7slKOlr64FKvU0dj9/pYGEXZeH926
 	}
 
 	root * /srv/dbt-docs
