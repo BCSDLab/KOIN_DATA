@@ -1,20 +1,41 @@
 version: 2
 
 models:
-  - name: silver_ga4_events
+  - name: silver_events
     description: >
-      GA4 원본 이벤트를 정제한 silver 레이어. event_params 배열을 컬럼으로 펴고
-      타입을 변환한다. (테스트 버전 — 현재 오늘치만)
+      GA4 원본 이벤트를 정제한 silver 레이어. event_params(배열)/device(레코드)를
+      컬럼으로 편다. 증분(insert_overwrite, event_dt 파티션) + 최근 3일 재처리.
+      백필은 --vars '{"start_date":"YYYYMMDD","end_date":"YYYYMMDD"}'.
     columns:
       - name: event_dt
-        description: 이벤트 날짜 (event_date를 DATE로 변환)
-      - name: event_at
-        description: 이벤트 시각 (event_timestamp 마이크로초 → TIMESTAMP)
-      - name: event_name
-        description: GA4 이벤트 이름 (page_view, session_start 등)
-      - name: user_pseudo_id
-        description: GA4가 부여한 익명 유저 ID
+        description: 이벤트 날짜 (GA4 event_date, KST 기준). 파티션 키.
         tests:
           - not_null
+      - name: event_at
+        description: 이벤트 시각 DATETIME (KST)
+      - name: event_ts
+        description: 이벤트 원본 타임스탬프 (마이크로초)
+      - name: event_name
+        description: GA4 이벤트 이름 (page_view, session_start 등)
+        tests:
+          - not_null
+      - name: user_pseudo_id
+        description: GA4 익명 유저 ID
+        tests:
+          - not_null
+      - name: ga_session_id
+        description: GA4 세션 ID (event_params ga_session_id)
+      - name: platform
+        description: 플랫폼 (WEB / ANDROID / IOS)
+      - name: device_category
+        description: 기기 종류 (mobile / desktop / tablet)
+      - name: device_os
+        description: OS (Android / iOS / Windows 등)
+      - name: device_os_version
+        description: OS 버전
       - name: page_location
         description: 이벤트 발생 페이지 URL
+      - name: page_title
+        description: 페이지 제목
+      - name: engagement_time_msec
+        description: 인게이지먼트 시간(ms)
