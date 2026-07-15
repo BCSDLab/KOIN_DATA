@@ -19,6 +19,12 @@ x-airflow-common: &airflow-common
     - ./airflow/logs:/opt/airflow/logs
     - ./secrets:/opt/airflow/secrets:ro
     - ./airflow/passwords.json:/opt/airflow/simple_auth_manager_passwords.json.generated
+    # dbt 프로젝트(네 SQL 모델들)를 실시간 연결 — Cosmos가 이걸 읽어 task로 변환.
+    # target/ logs/ 를 dbt가 써야 하므로 read-only(:ro) 아님.
+    - ./dbt:/opt/airflow/dbt
+    # 로컬 dev(oauth) 인증 — 네가 gcloud로 로그인해둔 ADC를 airflow 방에 빌려줌.
+    # 서버(prod)는 secrets의 서비스계정 키를 쓰므로 이 줄과 무관.
+    - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
   depends_on:
     postgres:
       condition: service_healthy
