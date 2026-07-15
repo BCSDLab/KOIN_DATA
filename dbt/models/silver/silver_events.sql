@@ -3,7 +3,7 @@
     materialized='incremental',
     incremental_strategy='insert_overwrite',
     partition_by={'field': 'event_dt', 'data_type': 'date'},
-    cluster_by=['user_pseudo_id', 'event_name']
+    cluster_by=['event_name', 'user_pseudo_id']
   )
 }}
 
