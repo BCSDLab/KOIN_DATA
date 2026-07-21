@@ -3,15 +3,15 @@ version: 2
 sources:
   - name: ga4
     description: >
-      GA4 BigQuery Export — 메인 사이트(koreatech.in) 이벤트 스트림.
-      dev=stage.koreatech.in(analytics_427218788), 
-      prod=koreatech.in(analytics_432041405).
+      GA4 BigQuery Export — 메인 사이트(koreatech.in) production 이벤트 스트림.
+      기본 원본은 kap-chat.analytics_432041405이며, 다른 환경은 환경변수로 재정의한다.
       데이터셋 이름은 GA4가 자동 관리하므로 여기서 별명(ga4)으로 가린다.
-    database: "{{ env_var('KOIN_DATA_GA4_PROJECT', 'koin-stage-438512') }}"
-    schema: "{{ env_var('KOIN_DATA_GA4_DATASET', 'analytics_427218788') }}"
+    database: "{{ env_var('KOIN_DATA_GA4_PROJECT', 'kap-chat') }}"
+    schema: "{{ env_var('KOIN_DATA_GA4_DATASET', 'analytics_432041405') }}"
     tables:
       - name: events
         description: >
           일자별 GA4 이벤트. events_YYYYMMDD(확정) + events_intraday_YYYYMMDD(당일 실시간)이
-          함께 잡히므로, silver 모델에서 intraday 처리/중복 제거를 한다.
+          함께 잡힌다. 현재 silver 모델은 완료된 확정 일별 테이블만 명시적으로 처리하며,
+          intraday 데이터는 향후 실시간 전용 모델에서 별도로 처리한다.
         identifier: events_*
