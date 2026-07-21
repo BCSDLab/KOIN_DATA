@@ -457,13 +457,26 @@ signup_candidates as (
 
 ),
 
+-- 기존 Dataform과 동일하게 가입 시작 시각의 KST DATETIME 문자열로 보정 ID를 만든다.
+signup_candidates_localized as (
+
+    select
+        signup_candidates.*,
+        datetime(
+            timestamp_micros(anchor_start_event_ts),
+            'Asia/Seoul'
+        ) as anchor_start_at
+    from signup_candidates
+
+),
+
 generated_signup_sessions as (
 
     select
         event_id,
         concat(
             'sign_up_strict_',
-            cast(div(anchor_start_event_ts, 1000000) as string),
+            cast(unix_seconds(timestamp(anchor_start_at)) as string),
             '_',
             upper(
                 substr(
@@ -471,7 +484,7 @@ generated_signup_sessions as (
                         md5(
                             concat(
                                 user_pseudo_id,
-                                cast(anchor_start_event_ts as string)
+                                cast(anchor_start_at as string)
                             )
                         )
                     ),
@@ -480,7 +493,7 @@ generated_signup_sessions as (
                 )
             )
         ) as generated_custom_session_id
-    from signup_candidates
+    from signup_candidates_localized
     where anchor_start_event_ts is not null
       and event_ts between anchor_start_event_ts and anchor_start_event_ts + (15 * 60 * 1000000)
 
