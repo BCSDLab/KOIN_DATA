@@ -12,20 +12,40 @@
     )
 }}
 
+{% set start_date_var = var('start_date', none) %}
+{% set end_date_var = var('end_date', none) %}
+{% set start_date = start_date_var | string if start_date_var is not none else none %}
+{% set end_date = end_date_var | string if end_date_var is not none else none %}
+
+{% if (start_date and not end_date) or (end_date and not start_date) %}
+    {{ exceptions.raise_compiler_error('start_date와 end_date는 반드시 함께 지정해야 합니다.') }}
+{% endif %}
+
+{% if start_date and end_date and (start_date | length != 8 or end_date | length != 8 or start_date > end_date) %}
+    {{ exceptions.raise_compiler_error('start_date와 end_date는 YYYYMMDD 형식이며 시작일이 종료일보다 늦을 수 없습니다.') }}
+{% endif %}
+
 -- 처리 기준
---   * 전체 적재: batch_* 필드가 안정적으로 존재하는 2024-07-11부터 어제까지
+--   * 전체 적재: 합의된 분석 시작일인 2024-07-11부터 어제까지
+--   * 범위 백필: start_date/end_date(YYYYMMDD)로 지정한 파티션만 계산해 교체
 --   * 증분 적재: 완료된 최근 3일 파티션을 다시 계산해 원자적으로 교체
---   * Android 가입 세션: 대상 시작 시각보다 15분 앞선 이벤트까지 읽되 최종 출력에서 제외
+--   * Android 가입 세션: 최초 시작일을 제외한 범위는 15분 앞선 이벤트까지 읽는다.
 
 with date_window as (
 
     select
-        {% if is_incremental() %}
+        {% if start_date and end_date %}
+            parse_date('%Y%m%d', '{{ start_date }}') as target_start_dt,
+        {% elif is_incremental() %}
             date_sub(current_date('Asia/Seoul'), interval 3 day) as target_start_dt,
         {% else %}
             date '2024-07-11' as target_start_dt,
         {% endif %}
-        date_sub(current_date('Asia/Seoul'), interval 1 day) as target_end_dt
+        {% if start_date and end_date %}
+            parse_date('%Y%m%d', '{{ end_date }}') as target_end_dt
+        {% else %}
+            date_sub(current_date('Asia/Seoul'), interval 1 day) as target_end_dt
+        {% endif %}
 
 ),
 
@@ -34,9 +54,13 @@ input_window as (
     select
         target_start_dt,
         target_end_dt,
-        datetime_sub(
+        if(
+            target_start_dt = date '2024-07-11',
             datetime(target_start_dt, time '00:00:00'),
-            interval 15 minute
+            datetime_sub(
+                datetime(target_start_dt, time '00:00:00'),
+                interval 15 minute
+            )
         ) as input_start_at,
         datetime(
             date_add(target_end_dt, interval 1 day),
@@ -53,20 +77,31 @@ source_filtered as (
         e as raw_event,
         _table_suffix as source_table_suffix
     from {{ source('ga4', 'events') }} as e
-    cross join input_window as window
+    cross join input_window as input_range
     where regexp_contains(_table_suffix, r'^\d{8}$')
-      {% if is_incremental() %}
+      {% if start_date and end_date %}
+      and _table_suffix between
+          {% if start_date == '20240711' %}
+          '{{ start_date }}'
+          {% else %}
+          format_date(
+              '%Y%m%d',
+              date_sub(parse_date('%Y%m%d', '{{ start_date }}'), interval 1 day)
+          )
+          {% endif %}
+          and '{{ end_date }}'
+      {% elif is_incremental() %}
       -- target_start_dt의 15분 lookback이 전날로 넘어갈 수 있어 하루를 더 스캔한다.
       and _table_suffix between
           format_date('%Y%m%d', date_sub(current_date('Asia/Seoul'), interval 4 day))
           and format_date('%Y%m%d', date_sub(current_date('Asia/Seoul'), interval 1 day))
       {% else %}
       and _table_suffix between
-          '20240710'
+          '20240711'
           and format_date('%Y%m%d', date_sub(current_date('Asia/Seoul'), interval 1 day))
       {% endif %}
-      and datetime(timestamp_micros(e.event_timestamp), 'Asia/Seoul') >= window.input_start_at
-      and datetime(timestamp_micros(e.event_timestamp), 'Asia/Seoul') < window.input_end_at
+      and datetime(timestamp_micros(e.event_timestamp), 'Asia/Seoul') >= input_range.input_start_at
+      and datetime(timestamp_micros(e.event_timestamp), 'Asia/Seoul') < input_range.input_end_at
 
 ),
 
@@ -88,10 +123,30 @@ source_canonicalized as (
 
 ),
 
-raw_keyed as (
+-- event_params 배열 순서만 다른 동일 raw row를 같은 payload로 취급한다.
+source_payload_canonicalized as (
 
     select
         source_canonicalized.*,
+        to_json_string(
+            struct(
+                to_json_string(
+                    (select as struct raw_event.* except (event_params))
+                ) as non_param_payload,
+                canonical_event_params as event_params
+            )
+        ) as canonical_payload_json
+    from source_canonicalized
+
+),
+
+raw_keyed as (
+
+    select
+        source_payload_canonicalized.*,
+        -- 완전히 같은 canonical raw payload만 물리 중복으로 제거한다.
+        to_hex(sha256(canonical_payload_json)) as raw_event_id,
+        -- GA4 전송·배치 키는 유일성을 보장하지 않으므로 계보·진단 용도로만 보존한다.
         to_hex(
             sha256(
                 to_json_string(
@@ -106,9 +161,8 @@ raw_keyed as (
                     )
                 )
             )
-        ) as raw_event_id,
-        to_hex(sha256(to_json_string(raw_event))) as canonical_payload_hash
-    from source_canonicalized
+        ) as raw_delivery_id
+    from source_payload_canonicalized
 
 ),
 
@@ -116,7 +170,7 @@ raw_key_stats as (
 
     select
         raw_event_id,
-        count(distinct canonical_payload_hash) as payload_variant_count
+        count(distinct canonical_payload_json) as payload_variant_count
     from raw_keyed
     group by raw_event_id
 
@@ -144,8 +198,8 @@ bronze_deduped as (
     qualify row_number() over (
         partition by raw_event_id
         order by
-            canonical_payload_hash,
-            to_json_string(raw_event),
+            canonical_payload_json,
+            raw_delivery_id,
             source_table_suffix
     ) = 1
 
@@ -252,7 +306,7 @@ params_unnested as (
         param.value as param_value,
         param_offset
     from silver_deduped
-    left join unnest(silver_deduped.raw_event.event_params) as param
+    left join unnest(silver_deduped.canonical_event_params) as param
         with offset as param_offset
         on true
 
@@ -272,7 +326,7 @@ param_values as (
 
 ),
 
--- 같은 key가 반복되면 원본 배열의 첫 번째 값을 결정적으로 사용한다.
+-- 같은 key가 반복되면 canonical 정렬 기준의 첫 번째 값을 결정적으로 사용한다.
 params_first_occurrence as (
 
     select *
@@ -382,24 +436,24 @@ signup_stage as (
 signup_candidates as (
 
     select
-        signup_stage.*,
+        staged.*,
         last_value(
-            if(signup_stage = 'signup_start', event_ts, null) ignore nulls
+            if(staged.signup_stage = 'signup_start', staged.event_ts, null) ignore nulls
         ) over (
-            partition by user_pseudo_id
+            partition by staged.user_pseudo_id
             order by
-                event_ts,
-                coalesce(event_bundle_sequence_id, -1),
-                coalesce(batch_ordering_id, -1),
-                coalesce(batch_event_index, -1),
-                event_id
+                staged.event_ts,
+                coalesce(staged.event_bundle_sequence_id, -1),
+                coalesce(staged.batch_ordering_id, -1),
+                coalesce(staged.batch_event_index, -1),
+                staged.event_id
             rows between unbounded preceding and current row
         ) as anchor_start_event_ts
-    from signup_stage
-    where platform = 'ANDROID'
-      and custom_session_id is null
-      and user_pseudo_id is not null
-      and signup_stage is not null
+    from signup_stage as staged
+    where staged.platform = 'ANDROID'
+      and staged.custom_session_id is null
+      and staged.user_pseudo_id is not null
+      and staged.signup_stage is not null
 
 ),
 
@@ -435,7 +489,7 @@ generated_signup_sessions as (
 signup_sessionized as (
 
     select
-        signup_stage.* except (
+        staged.* except (
             custom_session_id,
             signup_stage,
             event_bundle_sequence_id,
@@ -443,10 +497,10 @@ signup_sessionized as (
             batch_event_index
         ),
         coalesce(
-            signup_stage.custom_session_id,
+            staged.custom_session_id,
             generated_signup_sessions.generated_custom_session_id
         ) as custom_session_id
-    from signup_stage
+    from signup_stage as staged
     left join generated_signup_sessions using (event_id)
 
 ),
