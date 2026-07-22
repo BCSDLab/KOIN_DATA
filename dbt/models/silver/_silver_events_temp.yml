@@ -1,0 +1,86 @@
+version: 2
+
+models:
+  - name: silver_events_temp
+    description: >
+      GA4 확정 일별 Export를 이벤트 grain으로 정제한 Silver 증분 테이블.
+      raw_event_id 물리 중복 제거와 event_id 논리 중복 제거를 UNNEST 전에 수행하고,
+      공통 이벤트 파라미터·KST 시간·화면명·Android 가입 세션을 표준화한다.
+    columns:
+      - name: raw_event_id
+        description: event_params를 타입·키 기준으로 정렬한 전체 원천 payload의 SHA256 식별자. 배열 순서만 다른 동일 payload는 같은 값이 된다.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: event_id
+        description: 사용자·시각·이벤트 내용으로 생성하고 논리 중복을 제거한 Silver PK
+        data_tests:
+          - not_null
+          - unique
+
+      - name: event_dt
+        description: Asia/Seoul 기준 이벤트 날짜이자 테이블 파티션 키
+        data_tests:
+          - not_null
+
+      - name: event_at
+        description: Asia/Seoul 기준 이벤트 현지 일시(DATETIME)
+        data_tests:
+          - not_null
+
+      - name: event_ts
+        description: GA4 event_timestamp 원본 마이크로초 값(INT64)
+        data_tests:
+          - not_null
+
+      - name: event_name
+        description: GA4 이벤트 이름
+        data_tests:
+          - not_null
+
+      - name: user_pseudo_id
+        description: GA4 가명 사용자 식별자. 동의 거부로 발생하는 정상 NULL을 허용한다.
+
+      - name: ga_session_id
+        description: event_params에서 추출한 GA4 세션 식별자
+
+      - name: custom_session_id
+        description: 원본 값을 우선하고 Android 회원가입 이벤트는 15분 규칙으로 보정한 세션 식별자
+
+      - name: platform
+        description: 이벤트 발생 플랫폼(WEB, ANDROID, IOS 등)
+        data_tests:
+          - not_null
+
+      - name: device_category
+        description: GA4 device.category
+        data_tests:
+          - not_null
+
+      - name: device_os
+        description: GA4 device.operating_system. 정상 NULL을 허용하며 별도로 모니터링한다.
+
+      - name: device_os_version
+        description: GA4 device.operating_system_version
+
+      - name: event_label
+        description: event_params의 event_label
+
+      - name: event_category
+        description: event_params의 event_category
+
+      - name: event_value
+        description: event_params의 value를 STRING으로 표준화한 값
+
+      - name: page_title
+        description: event_params의 page_title
+
+      - name: screen_class
+        description: screen_name 우선순위와 Activity 이름 보정을 적용한 화면 클래스
+
+      - name: engagement_time_msec
+        description: event_params의 engagement_time_msec를 INT64로 안전 변환한 값
+
+      - name: page_location
+        description: event_params의 page_location URL
