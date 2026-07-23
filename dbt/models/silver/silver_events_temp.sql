@@ -145,23 +145,7 @@ raw_keyed as (
     select
         source_payload_canonicalized.*,
         -- 완전히 같은 canonical raw payload만 물리 중복으로 제거한다.
-        to_hex(sha256(canonical_payload_json)) as raw_event_id,
-        -- GA4 전송·배치 키는 유일성을 보장하지 않으므로 계보·진단 용도로만 보존한다.
-        to_hex(
-            sha256(
-                to_json_string(
-                    struct(
-                        raw_event.stream_id as stream_id,
-                        raw_event.user_pseudo_id as user_pseudo_id,
-                        raw_event.event_bundle_sequence_id as event_bundle_sequence_id,
-                        raw_event.event_server_timestamp_offset as event_server_timestamp_offset,
-                        raw_event.batch_page_id as batch_page_id,
-                        raw_event.batch_ordering_id as batch_ordering_id,
-                        raw_event.batch_event_index as batch_event_index
-                    )
-                )
-            )
-        ) as raw_delivery_id
+        to_hex(sha256(canonical_payload_json)) as raw_event_id
     from source_payload_canonicalized
 
 ),
@@ -199,7 +183,6 @@ bronze_deduped as (
         partition by raw_event_id
         order by
             canonical_payload_json,
-            raw_delivery_id,
             source_table_suffix
     ) = 1
 
