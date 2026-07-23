@@ -8,7 +8,7 @@ models:
       공통 이벤트 파라미터·KST 시간·화면명·Android 가입 세션을 표준화한다.
     columns:
       - name: raw_event_id
-        description: event_params를 타입·키 기준으로 정렬한 전체 원천 payload의 SHA256 식별자. 배열 순서만 다른 동일 payload는 같은 값이 된다.
+        description: 전송·배치 위치, user_pseudo_id, canonical event_params로 생성한 원천 물리 행의 SHA256 식별자
         data_tests:
           - not_null
           - unique
