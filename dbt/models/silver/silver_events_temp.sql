@@ -441,7 +441,14 @@ signup_candidates as (
     select
         staged.*,
         last_value(
-            if(staged.signup_stage = 'signup_start', staged.event_ts, null) ignore nulls
+            if(
+                staged.signup_stage = 'signup_start',
+                struct(
+                    staged.event_ts as anchor_event_ts,
+                    staged.custom_session_id as anchor_custom_session_id
+                ),
+                null
+            ) ignore nulls
         ) over (
             partition by staged.user_pseudo_id
             order by
@@ -451,53 +458,58 @@ signup_candidates as (
                 coalesce(staged.batch_event_index, -1),
                 staged.event_id
             rows between unbounded preceding and current row
-        ) as anchor_start_event_ts
+        ) as anchor_start
     from signup_stage as staged
     where staged.platform = 'ANDROID'
-      and staged.custom_session_id is null
       and staged.user_pseudo_id is not null
       and staged.signup_stage is not null
 
 ),
 
--- 기존 Dataform과 동일하게 가입 시작 시각의 KST DATETIME 문자열로 보정 ID를 만든다.
 signup_candidates_localized as (
 
     select
-        signup_candidates.*,
+        signup_candidates.* except (anchor_start),
+        anchor_start.anchor_event_ts as anchor_start_event_ts,
+        anchor_start.anchor_custom_session_id as anchor_custom_session_id,
         datetime(
-            timestamp_micros(anchor_start_event_ts),
+            timestamp_micros(anchor_start.anchor_event_ts),
             'Asia/Seoul'
         ) as anchor_start_at
     from signup_candidates
 
 ),
 
-generated_signup_sessions as (
+-- 최신 가입 시작의 기존 ID를 우선 상속하고, 없을 때만 Dataform 호환 ID를 생성한다.
+signup_session_fills as (
 
     select
         event_id,
-        concat(
-            'sign_up_strict_',
-            cast(unix_seconds(timestamp(anchor_start_at)) as string),
-            '_',
-            upper(
-                substr(
-                    to_hex(
-                        md5(
-                            concat(
-                                user_pseudo_id,
-                                cast(anchor_start_at as string)
+        coalesce(
+            anchor_custom_session_id,
+            concat(
+                'sign_up_strict_',
+                cast(unix_seconds(timestamp(anchor_start_at)) as string),
+                '_',
+                upper(
+                    substr(
+                        to_hex(
+                            md5(
+                                concat(
+                                    user_pseudo_id,
+                                    cast(anchor_start_at as string)
+                                )
                             )
-                        )
-                    ),
-                    1,
-                    5
+                        ),
+                        1,
+                        5
+                    )
                 )
             )
-        ) as generated_custom_session_id
+        ) as filled_custom_session_id
     from signup_candidates_localized
-    where anchor_start_event_ts is not null
+    where custom_session_id is null
+      and anchor_start_event_ts is not null
       and event_ts between anchor_start_event_ts and anchor_start_event_ts + (15 * 60 * 1000000)
 
 ),
@@ -514,10 +526,10 @@ signup_sessionized as (
         ),
         coalesce(
             staged.custom_session_id,
-            generated_signup_sessions.generated_custom_session_id
+            signup_session_fills.filled_custom_session_id
         ) as custom_session_id
     from signup_stage as staged
-    left join generated_signup_sessions using (event_id)
+    left join signup_session_fills using (event_id)
 
 ),
 

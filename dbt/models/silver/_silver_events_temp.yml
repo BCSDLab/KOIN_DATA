@@ -46,7 +46,7 @@ models:
         description: event_params에서 추출한 GA4 세션 식별자
 
       - name: custom_session_id
-        description: 원본 값을 우선하고 Android 회원가입 이벤트는 15분 규칙으로 보정한 세션 식별자
+        description: 원본 값을 우선하고 Android 회원가입 이벤트는 최근 시작 ID 상속 또는 15분 생성 규칙으로 보정한 세션 식별자
 
       - name: platform
         description: 이벤트 발생 플랫폼(WEB, ANDROID, IOS 등)
