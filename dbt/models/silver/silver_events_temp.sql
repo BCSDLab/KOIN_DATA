@@ -105,7 +105,7 @@ source_filtered as (
 
 ),
 
--- event_id 해시에서는 값 타입과 무관한 문자열 변환을 하지 않는다.
+-- raw_event_id와 event_id 해시에서는 값 타입과 무관한 문자열 변환을 하지 않는다.
 source_canonicalized as (
 
     select
@@ -140,13 +140,33 @@ source_payload_canonicalized as (
 
 ),
 
-raw_keyed as (
+-- 전송·배치 위치와 canonical event_params를 raw event의 물리 식별 정보로 사용한다.
+raw_identity_prepared as (
 
     select
         source_payload_canonicalized.*,
-        -- 완전히 같은 canonical raw payload만 물리 중복으로 제거한다.
-        to_hex(sha256(canonical_payload_json)) as raw_event_id
+        to_json_string(
+            struct(
+                raw_event.stream_id as stream_id,
+                raw_event.user_pseudo_id as user_pseudo_id,
+                raw_event.event_bundle_sequence_id as event_bundle_sequence_id,
+                raw_event.event_server_timestamp_offset as event_server_timestamp_offset,
+                raw_event.batch_page_id as batch_page_id,
+                raw_event.batch_ordering_id as batch_ordering_id,
+                raw_event.batch_event_index as batch_event_index,
+                canonical_event_params as event_params
+            )
+        ) as raw_identity_json
     from source_payload_canonicalized
+
+),
+
+raw_keyed as (
+
+    select
+        raw_identity_prepared.*,
+        to_hex(sha256(raw_identity_json)) as raw_event_id
+    from raw_identity_prepared
 
 ),
 
@@ -154,22 +174,22 @@ raw_key_stats as (
 
     select
         raw_event_id,
-        count(distinct canonical_payload_json) as payload_variant_count
+        count(distinct raw_identity_json) as raw_identity_variant_count
     from raw_keyed
     group by raw_event_id
 
 ),
 
--- 같은 raw_event_id가 서로 다른 payload를 가리키면 제거하지 않고 모델을 실패시킨다.
+-- 같은 해시가 서로 다른 raw identity를 가리키면 제거하지 않고 모델을 실패시킨다.
 raw_validated as (
 
     select raw_keyed.*
     from raw_keyed
     inner join raw_key_stats using (raw_event_id)
     where if(
-        payload_variant_count = 1,
+        raw_identity_variant_count = 1,
         true,
-        error(format('raw_event_id %s maps to multiple payloads', raw_event_id))
+        error(format('raw_event_id %s maps to multiple raw identities', raw_event_id))
     )
 
 ),
