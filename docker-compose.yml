@@ -26,7 +26,10 @@ x-airflow-common: &airflow-common
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
-    - ./secrets:/opt/airflow/secrets:ro
+    # dbt 컨테이너와 같은 경로를 쓴다. profiles.yml의 prod keyfile 기본값이
+    # /secrets/gcp-service-account.json 이므로, 경로를 통일해두면 서버에서
+    # GOOGLE_APPLICATION_CREDENTIALS를 따로 설정하지 않아도 맞는다.
+    - ./secrets:/secrets:ro
     - ./airflow/passwords.json:/opt/airflow/simple_auth_manager_passwords.json.generated
     # dbt 프로젝트(네 SQL 모델들)를 실시간 연결 — Cosmos가 이걸 읽어 task로 변환.
     # target/ logs/ 를 dbt가 써야 하므로 read-only(:ro) 아님.
