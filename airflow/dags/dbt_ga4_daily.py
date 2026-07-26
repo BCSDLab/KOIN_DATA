@@ -64,15 +64,30 @@ LOOKBACK_DAYS = 3
 #   * 스케줄 실행: 담당 구간(data_interval_start) 기준 최근 LOOKBACK_DAYS일
 #   * 수동 실행  : Trigger DAG w/ config로 넘긴 날짜를 그대로 사용
 #       {"start_date": "20240711", "end_date": "20260725"}   ← 전체 적재도 이렇게
-# dag_run.conf가 없는 스케줄 실행에서도 안전하도록 conf 자체를 or로 감싼다.
-CONF = "(dag_run.conf or {})"
+#
+# conf에 날짜가 하나라도 있으면 두 값 모두 conf에서만 읽는다. 한쪽만 넣었을 때
+# 나머지를 자동값으로 채우면 의도하지 않은 범위(예: 2년치)가 조용히 돌 수 있어,
+# 빈 값을 그대로 넘겨 모델의 "둘 다 지정" 검증에서 실패하게 만든다.
+#
+# dag_run.conf는 스케줄 실행에서 None이므로 or {} 로 감싼다.
 DATE_VARS = {
     "start_date": (
-        "{{ %s.get('start_date')"
-        " or (data_interval_start - macros.timedelta(days=%d)) | ds_nodash }}"
-        % (CONF, LOOKBACK_DAYS)
+        "{% set conf = dag_run.conf or {} %}"
+        "{% if conf.get('start_date') or conf.get('end_date') %}"
+        "{{ conf.get('start_date', '') }}"
+        "{% else %}"
+        "{{ (data_interval_start - macros.timedelta(days=" + str(LOOKBACK_DAYS) + "))"
+        " | ds_nodash }}"
+        "{% endif %}"
     ),
-    "end_date": "{{ %s.get('end_date') or data_interval_start | ds_nodash }}" % CONF,
+    "end_date": (
+        "{% set conf = dag_run.conf or {} %}"
+        "{% if conf.get('start_date') or conf.get('end_date') %}"
+        "{{ conf.get('end_date', '') }}"
+        "{% else %}"
+        "{{ data_interval_start | ds_nodash }}"
+        "{% endif %}"
+    ),
 }
 
 dbt_ga4_daily = DbtDag(
