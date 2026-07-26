@@ -19,7 +19,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
     # Execution API는 JWT로 보호된다. 지정하지 않으면 컨테이너마다 랜덤 키를 만들어
     # scheduler가 서명한 토큰을 api-server가 거부한다(403). 두 컨테이너가 같은 값을 써야 한다.
-    AIRFLOW__API_AUTH__JWT_SECRET: ${KOIN_DATA_AIRFLOW_JWT_SECRET:-change_me_jwt_secret}
+    # 기본값을 두지 않는다. 값이 없으면 컨테이너가 뜨지 않아 설정 누락을 바로 알 수 있다.
+    # (기본값이 있으면 서버에서 깜빡했을 때 예측 가능한 키로 조용히 운영된다)
+    AIRFLOW__API_AUTH__JWT_SECRET: "${KOIN_DATA_AIRFLOW_JWT_SECRET:?.env에 KOIN_DATA_AIRFLOW_JWT_SECRET을 설정하세요. openssl rand -base64 32 으로 생성하세요}"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
