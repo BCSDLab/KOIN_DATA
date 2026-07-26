@@ -3,39 +3,84 @@ version: 2
 models:
   - name: silver_events
     description: >
-      GA4 원본 이벤트를 정제한 silver 레이어. event_params(배열)/device(레코드)를
-      컬럼으로 편다. 증분(insert_overwrite, event_dt 파티션) + 최근 3일 재처리.
-      백필은 --vars '{"start_date":"YYYYMMDD","end_date":"YYYYMMDD"}'.
+      GA4 확정 일별 Export를 이벤트 grain으로 정제한 Silver 증분 테이블.
+      raw_event_id 물리 중복 제거와 event_id 논리 중복 제거를 UNNEST 전에 수행하고,
+      공통 이벤트 파라미터·KST 시간·화면명·Android 가입 세션을 표준화한다.
     columns:
+      - name: raw_event_id
+        description: 전송·배치 위치, user_pseudo_id, canonical event_params로 생성한 원천 물리 행의 SHA256 식별자
+        data_tests:
+          - not_null
+          - unique
+
+      - name: event_id
+        description: 사용자·시각·이벤트 내용으로 생성하고 논리 중복을 제거한 Silver PK
+        data_tests:
+          - not_null
+          - unique
+
       - name: event_dt
-        description: 이벤트 날짜 (GA4 event_date, KST 기준). 파티션 키.
-        tests:
+        description: Asia/Seoul 기준 이벤트 날짜이자 테이블 파티션 키
+        data_tests:
           - not_null
+
       - name: event_at
-        description: 이벤트 시각 DATETIME (KST)
+        description: Asia/Seoul 기준 이벤트 현지 일시(DATETIME)
+        data_tests:
+          - not_null
+
       - name: event_ts
-        description: 이벤트 원본 타임스탬프 (마이크로초)
+        description: GA4 event_timestamp 원본 마이크로초 값(INT64)
+        data_tests:
+          - not_null
+
       - name: event_name
-        description: GA4 이벤트 이름 (page_view, session_start 등)
-        tests:
+        description: GA4 이벤트 이름
+        data_tests:
           - not_null
+
       - name: user_pseudo_id
-        description: GA4 익명 유저 ID
-        tests:
-          - not_null
+        description: GA4 가명 사용자 식별자. 동의 거부로 발생하는 정상 NULL을 허용한다.
+
       - name: ga_session_id
-        description: GA4 세션 ID (event_params ga_session_id)
+        description: event_params에서 추출한 GA4 세션 식별자
+
+      - name: custom_session_id
+        description: 원본 값을 우선하고 Android 회원가입 이벤트는 최근 시작 ID 상속 또는 15분 생성 규칙으로 보정한 세션 식별자
+
       - name: platform
-        description: 플랫폼 (WEB / ANDROID / IOS)
+        description: 이벤트 발생 플랫폼(WEB, ANDROID, IOS 등)
+        data_tests:
+          - not_null
+
       - name: device_category
-        description: 기기 종류 (mobile / desktop / tablet)
+        description: GA4 device.category
+        data_tests:
+          - not_null
+
       - name: device_os
-        description: OS (Android / iOS / Windows 등)
+        description: GA4 device.operating_system. 정상 NULL을 허용하며 별도로 모니터링한다.
+
       - name: device_os_version
-        description: OS 버전
-      - name: page_location
-        description: 이벤트 발생 페이지 URL
+        description: GA4 device.operating_system_version
+
+      - name: event_label
+        description: event_params의 event_label
+
+      - name: event_category
+        description: event_params의 event_category
+
+      - name: event_value
+        description: event_params의 value를 STRING으로 표준화한 값
+
       - name: page_title
-        description: 페이지 제목
+        description: event_params의 page_title
+
+      - name: screen_class
+        description: screen_name 우선순위와 Activity 이름 보정을 적용한 화면 클래스
+
       - name: engagement_time_msec
-        description: 인게이지먼트 시간(ms)
+        description: event_params의 engagement_time_msec를 INT64로 안전 변환한 값
+
+      - name: page_location
+        description: event_params의 page_location URL
