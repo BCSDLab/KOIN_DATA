@@ -13,12 +13,30 @@ x-airflow-common: &airflow-common
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${KOIN_DATA_POSTGRES_USER:-koin}:${KOIN_DATA_POSTGRES_PASSWORD:-change_me}@postgres:5432/${KOIN_DATA_AIRFLOW_DB:-airflow_metadata}
     # 프록시(Caddy) 뒤 공개 주소. 로컬은 localhost, 서버는 .env에서 https://airflow.bcsdlab.com 로 override
     AIRFLOW__API__BASE_URL: ${KOIN_DATA_AIRFLOW_BASE_URL:-http://localhost:8080}
+    # Airflow 3의 task는 실행 전 Execution API로 실행 정보를 받아온다.
+    # scheduler와 api-server가 다른 컨테이너이므로 도커 네트워크 주소로 지정해야 한다.
+    # (기본값 localhost:8080은 scheduler 자신을 가리켜 Connection refused)
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
+    # Execution API는 JWT로 보호된다. 지정하지 않으면 컨테이너마다 랜덤 키를 만들어
+    # scheduler가 서명한 토큰을 api-server가 거부한다(403). 두 컨테이너가 같은 값을 써야 한다.
+    # 기본값을 두지 않는다. 값이 없으면 컨테이너가 뜨지 않아 설정 누락을 바로 알 수 있다.
+    # (기본값이 있으면 서버에서 깜빡했을 때 예측 가능한 키로 조용히 운영된다)
+    AIRFLOW__API_AUTH__JWT_SECRET: "${KOIN_DATA_AIRFLOW_JWT_SECRET:?.env에 KOIN_DATA_AIRFLOW_JWT_SECRET을 설정하세요. openssl rand -base64 32 으로 생성하세요}"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
-    - ./secrets:/opt/airflow/secrets:ro
+    # dbt 컨테이너와 같은 경로를 쓴다. profiles.yml의 prod keyfile 기본값이
+    # /secrets/gcp-service-account.json 이므로, 경로를 통일해두면 서버에서
+    # GOOGLE_APPLICATION_CREDENTIALS를 따로 설정하지 않아도 맞는다.
+    - ./secrets:/secrets:ro
     - ./airflow/passwords.json:/opt/airflow/simple_auth_manager_passwords.json.generated
+    # dbt 프로젝트(네 SQL 모델들)를 실시간 연결 — Cosmos가 이걸 읽어 task로 변환.
+    # target/ logs/ 를 dbt가 써야 하므로 read-only(:ro) 아님.
+    - ./dbt:/opt/airflow/dbt
+    # 로컬 dev(oauth) 인증 — 네가 gcloud로 로그인해둔 ADC를 airflow 방에 빌려줌.
+    # 서버(prod)는 secrets의 서비스계정 키를 쓰므로 이 줄과 무관.
+    - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
   depends_on:
     postgres:
       condition: service_healthy

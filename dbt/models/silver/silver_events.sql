@@ -12,6 +12,20 @@
     )
 }}
 
+{#-
+  처리 범위는 호출자(Airflow 또는 사람)가 정한다.
+
+    * 기본     : vars 없이 실행하면 최근 3일(어제 기준)을 다시 계산해 교체
+    * 범위 지정: dbt run --vars '{"start_date":"YYYYMMDD","end_date":"YYYYMMDD"}'
+    * 전체 적재: 분석 시작일을 명시한다
+                 --vars '{"start_date":"20240711","end_date":"YYYYMMDD"}'
+
+  전체 적재는 2년치를 스캔하므로 실수로 발생하지 않도록 항상 명시를 요구한다.
+-#}
+{% set ANALYSIS_START_DATE = '20240711' %}
+{% set LOOKBACK_DAYS = 3 %}
+{% set SIGNUP_LOOKBACK_MINUTES = 15 %}
+
 {% set start_date_var = var('start_date', none) %}
 {% set end_date_var = var('end_date', none) %}
 {% set start_date = start_date_var | string if start_date_var is not none else none %}
@@ -21,31 +35,60 @@
     {{ exceptions.raise_compiler_error('start_date와 end_date는 반드시 함께 지정해야 합니다.') }}
 {% endif %}
 
-{% if start_date and end_date and (start_date | length != 8 or end_date | length != 8 or start_date > end_date) %}
-    {{ exceptions.raise_compiler_error('start_date와 end_date는 YYYYMMDD 형식이며 시작일이 종료일보다 늦을 수 없습니다.') }}
+{#-
+  두 값은 SQL 리터럴로 직접 삽입되므로 숫자 8자리만 허용한다.
+  길이만 검사하면 `1' or '1` 처럼 8자짜리 문자열이 통과해 SQL을 벗어난다.
+-#}
+{% if start_date and end_date %}
+    {% for value in [start_date, end_date] %}
+        {% if not modules.re.match('^\d{8}$', value) %}
+            {{ exceptions.raise_compiler_error(
+                "start_date와 end_date는 숫자 8자리(YYYYMMDD)여야 합니다. 받은 값: '" ~ value ~ "'"
+            ) }}
+        {% endif %}
+    {% endfor %}
+    {% if start_date > end_date %}
+        {{ exceptions.raise_compiler_error('start_date가 end_date보다 늦을 수 없습니다.') }}
+    {% endif %}
 {% endif %}
 
--- 처리 기준
---   * 전체 적재: 합의된 분석 시작일인 2024-07-11부터 어제까지
---   * 범위 백필: start_date/end_date(YYYYMMDD)로 지정한 파티션만 계산해 교체
---   * 증분 적재: 완료된 최근 3일 파티션을 다시 계산해 원자적으로 교체
---   * Android 가입 세션: 최초 시작일을 제외한 범위는 15분 앞선 이벤트까지 읽는다.
+{#-
+  교체할 파티션 범위. vars가 없으면 최근 LOOKBACK_DAYS일.
+-#}
+{% if start_date and end_date %}
+    {% set target_start_sql = "parse_date('%Y%m%d', '" ~ start_date ~ "')" %}
+    {% set target_end_sql = "parse_date('%Y%m%d', '" ~ end_date ~ "')" %}
+{% else %}
+    {% set target_start_sql = "date_sub(current_date('Asia/Seoul'), interval " ~ LOOKBACK_DAYS ~ " day)" %}
+    {% set target_end_sql = "date_sub(current_date('Asia/Seoul'), interval 1 day)" %}
+{% endif %}
+
+{#-
+  Android 가입 세션은 시작 시각보다 앞선 이벤트를 상속해야 하므로 범위 앞쪽을
+  SIGNUP_LOOKBACK_MINUTES만큼 더 읽는다. 그 lookback이 자정을 넘어 전날 테이블로
+  넘어갈 수 있어 스캔 범위도 하루 더 넓힌다.
+  분석 시작일에는 앞선 데이터 자체가 없으므로 둘 다 적용하지 않는다.
+-#}
+{% set apply_signup_lookback = start_date != ANALYSIS_START_DATE %}
+
+{% if apply_signup_lookback %}
+    {% set scan_start_sql = "format_date('%Y%m%d', date_sub(" ~ target_start_sql ~ ", interval 1 day))" %}
+{% else %}
+    {% set scan_start_sql = "'" ~ ANALYSIS_START_DATE ~ "'" %}
+{% endif %}
+
+{#- 날짜를 명시받았으면 리터럴로 둔다. BigQuery가 스캔할 테이블을 더 확실히 줄인다. -#}
+{% if end_date %}
+    {% set scan_end_sql = "'" ~ end_date ~ "'" %}
+{% else %}
+    {% set scan_end_sql = "format_date('%Y%m%d', " ~ target_end_sql ~ ")" %}
+{% endif %}
 
 with date_window as (
 
     select
-        {% if start_date and end_date %}
-            parse_date('%Y%m%d', '{{ start_date }}') as target_start_dt,
-        {% elif is_incremental() %}
-            date_sub(current_date('Asia/Seoul'), interval 3 day) as target_start_dt,
-        {% else %}
-            date '2024-07-11' as target_start_dt,
-        {% endif %}
-        {% if start_date and end_date %}
-            parse_date('%Y%m%d', '{{ end_date }}') as target_end_dt
-        {% else %}
-            date_sub(current_date('Asia/Seoul'), interval 1 day) as target_end_dt
-        {% endif %}
+        {{ target_start_sql }} as target_start_dt,
+        {{ target_end_sql }} as target_end_dt
 
 ),
 
@@ -54,14 +97,14 @@ input_window as (
     select
         target_start_dt,
         target_end_dt,
-        if(
-            target_start_dt = date '2024-07-11',
+        {% if apply_signup_lookback %}
+        datetime_sub(
             datetime(target_start_dt, time '00:00:00'),
-            datetime_sub(
-                datetime(target_start_dt, time '00:00:00'),
-                interval 15 minute
-            )
+            interval {{ SIGNUP_LOOKBACK_MINUTES }} minute
         ) as input_start_at,
+        {% else %}
+        datetime(target_start_dt, time '00:00:00') as input_start_at,
+        {% endif %}
         datetime(
             date_add(target_end_dt, interval 1 day),
             time '00:00:00'
@@ -78,28 +121,10 @@ source_filtered as (
         _table_suffix as source_table_suffix
     from {{ source('ga4', 'events') }} as e
     cross join input_window as input_range
+    -- _table_suffix 조건은 BigQuery가 스캔할 테이블을 미리 줄이도록
+    -- CTE 값이 아닌 상수 식으로 직접 쓴다.
     where regexp_contains(_table_suffix, r'^\d{8}$')
-      {% if start_date and end_date %}
-      and _table_suffix between
-          {% if start_date == '20240711' %}
-          '{{ start_date }}'
-          {% else %}
-          format_date(
-              '%Y%m%d',
-              date_sub(parse_date('%Y%m%d', '{{ start_date }}'), interval 1 day)
-          )
-          {% endif %}
-          and '{{ end_date }}'
-      {% elif is_incremental() %}
-      -- target_start_dt의 15분 lookback이 전날로 넘어갈 수 있어 하루를 더 스캔한다.
-      and _table_suffix between
-          format_date('%Y%m%d', date_sub(current_date('Asia/Seoul'), interval 4 day))
-          and format_date('%Y%m%d', date_sub(current_date('Asia/Seoul'), interval 1 day))
-      {% else %}
-      and _table_suffix between
-          '20240711'
-          and format_date('%Y%m%d', date_sub(current_date('Asia/Seoul'), interval 1 day))
-      {% endif %}
+      and _table_suffix between {{ scan_start_sql }} and {{ scan_end_sql }}
       and datetime(timestamp_micros(e.event_timestamp), 'Asia/Seoul') >= input_range.input_start_at
       and datetime(timestamp_micros(e.event_timestamp), 'Asia/Seoul') < input_range.input_end_at
 
