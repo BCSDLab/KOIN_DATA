@@ -13,11 +13,16 @@ Cosmos가 dbt 프로젝트를 읽어 모델 하나하나를 Airflow task로 변�
 from __future__ import annotations
 
 import os
+import re
 from datetime import timedelta
+from typing import Any
 
 import pendulum
+from airflow.providers.standard.operators.python import PythonOperator
 from cosmos import DbtDag, ExecutionConfig, ProfileConfig, ProjectConfig, RenderConfig
 from cosmos.constants import InvocationMode, TestBehavior
+
+DATE_PATTERN = re.compile(r"^\d{8}$")
 
 DBT_PROJECT_DIR = "/opt/airflow/dbt"
 
@@ -101,6 +106,37 @@ DATE_VARS = {
     ),
 }
 
+
+def validate_conf_dates(dag_run: Any = None, **_: Any) -> None:
+    """수동 실행으로 넘어온 날짜를 dbt에 전달하기 전에 검증한다.
+
+    두 값은 모델에서 SQL 리터럴로 삽입되므로 형식이 어긋나면 여기서 끊는다.
+    모델도 같은 검증을 하지만(CLI로 직접 실행하는 경로가 있으므로),
+    DAG에서 먼저 막아 잘못된 범위로 BigQuery를 스캔하지 않게 한다.
+    """
+    conf = (dag_run.conf if dag_run else None) or {}
+    start_date, end_date = conf.get("start_date"), conf.get("end_date")
+
+    if not start_date and not end_date:
+        return  # 스케줄 실행. 날짜는 Airflow가 계산한다.
+
+    if not (start_date and end_date):
+        raise ValueError(
+            "start_date와 end_date는 반드시 함께 지정해야 합니다. "
+            f"받은 conf: {conf!r}"
+        )
+
+    for key, value in (("start_date", start_date), ("end_date", end_date)):
+        if not DATE_PATTERN.match(str(value)):
+            raise ValueError(
+                f"{key}는 숫자 8자리(YYYYMMDD)여야 합니다. 받은 값: {value!r}"
+            )
+
+    if str(start_date) > str(end_date):
+        raise ValueError(
+            f"start_date({start_date})가 end_date({end_date})보다 늦을 수 없습니다."
+        )
+
 dbt_ga4_daily = DbtDag(
     dag_id="dbt_ga4_daily",
     project_config=project_config,
@@ -119,3 +155,15 @@ dbt_ga4_daily = DbtDag(
     tags=["dbt", "ga4", "silver"],
     doc_md=__doc__,
 )
+
+# Cosmos가 만든 dbt task들 앞에 날짜 검증을 세운다.
+# roots는 검증 task를 추가하기 전에 잡아둔다.
+_dbt_root_tasks = list(dbt_ga4_daily.roots)
+
+with dbt_ga4_daily:
+    validate_dates = PythonOperator(
+        task_id="validate_dates",
+        python_callable=validate_conf_dates,
+    )
+    for _root in _dbt_root_tasks:
+        validate_dates >> _root

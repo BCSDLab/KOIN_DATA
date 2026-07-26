@@ -35,8 +35,21 @@
     {{ exceptions.raise_compiler_error('start_date와 end_date는 반드시 함께 지정해야 합니다.') }}
 {% endif %}
 
-{% if start_date and end_date and (start_date | length != 8 or end_date | length != 8 or start_date > end_date) %}
-    {{ exceptions.raise_compiler_error('start_date와 end_date는 YYYYMMDD 형식이며 시작일이 종료일보다 늦을 수 없습니다.') }}
+{#-
+  두 값은 SQL 리터럴로 직접 삽입되므로 숫자 8자리만 허용한다.
+  길이만 검사하면 `1' or '1` 처럼 8자짜리 문자열이 통과해 SQL을 벗어난다.
+-#}
+{% if start_date and end_date %}
+    {% for value in [start_date, end_date] %}
+        {% if not modules.re.match('^\d{8}$', value) %}
+            {{ exceptions.raise_compiler_error(
+                "start_date와 end_date는 숫자 8자리(YYYYMMDD)여야 합니다. 받은 값: '" ~ value ~ "'"
+            ) }}
+        {% endif %}
+    {% endfor %}
+    {% if start_date > end_date %}
+        {{ exceptions.raise_compiler_error('start_date가 end_date보다 늦을 수 없습니다.') }}
+    {% endif %}
 {% endif %}
 
 {#-
