@@ -3,11 +3,13 @@ version: 2
 sources:
   - name: ga4
     description: >
-      GA4 BigQuery Export — 메인 사이트(koreatech.in) production 이벤트 스트림.
-      기본 원본은 kap-chat.analytics_432041405이며, 다른 환경은 환경변수로 재정의한다.
+      GA4 BigQuery Export — 메인 사이트(koreatech.in) 이벤트 스트림.
+      기본 원본은 stage(koin-stage-438512.analytics_427218788)이며,
+      운영(kap-chat.analytics_432041405)은 환경변수로 명시할 때만 읽는다.
+      환경변수를 깜빡해도 운영 데이터를 읽지 않도록 기본값을 stage로 둔다.
       데이터셋 이름은 GA4가 자동 관리하므로 여기서 별명(ga4)으로 가린다.
-    database: "{{ env_var('KOIN_DATA_GA4_PROJECT', 'kap-chat') }}"
-    schema: "{{ env_var('KOIN_DATA_GA4_DATASET', 'analytics_432041405') }}"
+    database: "{{ env_var('KOIN_DATA_GA4_PROJECT', 'koin-stage-438512') }}"
+    schema: "{{ env_var('KOIN_DATA_GA4_DATASET', 'analytics_427218788') }}"
     tables:
       - name: events
         description: >
