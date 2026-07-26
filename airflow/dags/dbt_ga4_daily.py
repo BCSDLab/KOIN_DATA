@@ -60,8 +60,16 @@ render_config = RenderConfig(
 # insert_overwrite라 파티션이 통째로 교체되어 삭제·변경까지 반영된다.
 LOOKBACK_DAYS = 3
 
+# GA4 확정 export는 전날까지만 존재하므로 오늘은 처리하지 않는다.
+#
+# 주의: Airflow 3에서 cron 문자열은 CronTriggerTimetable을 쓰며,
+# data_interval_start는 "직전 구간의 시작"이 아니라 실행 시각 그 자체다
+# (data_interval 길이가 0). 따라서 어제를 얻으려면 직접 1일을 빼야 한다.
+OFFSET_DAYS = 1
+
 # 처리 날짜는 항상 Airflow가 정한다.
-#   * 스케줄 실행: 담당 구간(data_interval_start) 기준 최근 LOOKBACK_DAYS일
+#   * 스케줄 실행: 실행일 기준 어제까지의 최근 LOOKBACK_DAYS일
+#                 (7/26 09:00 실행 → 20260723 ~ 20260725)
 #   * 수동 실행  : Trigger DAG w/ config로 넘긴 날짜를 그대로 사용
 #       {"start_date": "20240711", "end_date": "20260725"}   ← 전체 적재도 이렇게
 #
@@ -76,8 +84,9 @@ DATE_VARS = {
         "{% if conf.get('start_date') or conf.get('end_date') %}"
         "{{ conf.get('start_date', '') }}"
         "{% else %}"
-        "{{ (data_interval_start - macros.timedelta(days=" + str(LOOKBACK_DAYS) + "))"
-        " | ds_nodash }}"
+        "{{ (data_interval_start - macros.timedelta(days="
+        + str(OFFSET_DAYS + LOOKBACK_DAYS - 1)
+        + ")) | ds_nodash }}"
         "{% endif %}"
     ),
     "end_date": (
@@ -85,7 +94,9 @@ DATE_VARS = {
         "{% if conf.get('start_date') or conf.get('end_date') %}"
         "{{ conf.get('end_date', '') }}"
         "{% else %}"
-        "{{ data_interval_start | ds_nodash }}"
+        "{{ (data_interval_start - macros.timedelta(days="
+        + str(OFFSET_DAYS)
+        + ")) | ds_nodash }}"
         "{% endif %}"
     ),
 }
