@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: silver__users
+    description: >
+      누적 identity 이력에서 Dataform 호환 canonical user_id를 선정하고
+      앱 MySQL 회원 속성을 결합한 사용자 디멘션. 한 행은 실제 회원 1명이
+      아니라 GA4 user_pseudo_id 1개다.
+    config:
+      meta:
+        domain: user
+        grain: user_pseudo_id
+        owner: data_analytics
+    columns:
+      - name: user_pseudo_id
+        description: GA4 가명 사용자 식별자이자 이 모델의 grain
+        data_tests:
+          - unique
+
+      - name: user_id
+        description: canonical 로직이 선택한 대표 사용자 ID
+
+      - name: gender
+        description: GA4 행동 로그에서 가져온 성별
+
+      - name: major
+        description: GA4 행동 로그에서 가져온 전공
+
+      - name: entry_year
+        description: user_id 선두의 20xx 패턴에서 추출한 입학연도
+
+      - name: user_type
+        description: 앱 MySQL 회원 유형
+
+      - name: signup_completed_at
+        description: 앱 MySQL의 실제 회원가입 시각
+
+      - name: is_deleted
+        description: 앱 MySQL 회원 탈퇴 여부 원본 값
+
+      - name: is_mysql_mapped
+        description: canonical user_id가 앱 MySQL 회원 ID와 매핑되었는지 여부
+        data_tests:
+          - not_null

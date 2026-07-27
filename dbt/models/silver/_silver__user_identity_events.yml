@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: silver__user_identity_events
+    description: >
+      GA4 events_*에서 사용자 식별자와 사용자 속성 관측값을 날짜별로 추출한
+      누적 이력. 운영 시 Airflow가 전달한 최근 3일의 날짜 파티션만
+      insert_overwrite한다.
+    config:
+      meta:
+        domain: user
+        grain: identity_event
+        owner: data_analytics
+    columns:
+      - name: event_dt
+        description: Asia/Seoul 기준 이벤트 날짜
+        data_tests:
+          - not_null
+
+      - name: event_at
+        description: Asia/Seoul 기준 이벤트 일시
+        data_tests:
+          - not_null
+
+      - name: event_ts
+        description: GA4 이벤트 타임스탬프(마이크로초)
+        data_tests:
+          - not_null
+
+      - name: user_pseudo_id
+        description: GA4 가명 사용자 식별자
+
+      - name: uid_norm
+        description: Dataform 호환 규칙으로 정규화한 user_id
+
+      - name: _ingested_at
+        description: 해당 파티션을 dbt가 마지막으로 생성한 시각
