@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: app_db
+    description: >
+      운영 앱 회원 테이블의 논리적 dbt source다. 현재 물리 테이블은
+      kap-chat.analytics_432041405.koin_users에 있으며, 배포 환경에서는
+      KOIN_DATA_APP_DB_PROJECT와 KOIN_DATA_APP_DB_DATASET으로 명시한다.
+    database: "{{ env_var('KOIN_DATA_APP_DB_PROJECT', 'kap-chat') }}"
+    schema: "{{ env_var('KOIN_DATA_APP_DB_DATASET', 'analytics_432041405') }}"
+    tables:
+      - name: koin_users
+        description: KOIN 앱 회원 정보 스냅샷
