@@ -565,31 +565,46 @@ signup_sessionized as (
 
 ),
 
+event_label_corrected as (
+
+    select
+        signup_sessionized.* except (event_label),
+        case
+            when platform = 'IOS'
+                and lower(trim(event_label)) = 'find_user_write'
+                and trim(event_value) = '잃어버렸어요'
+                then 'lost_item_write'
+            else event_label
+        end as event_label
+    from signup_sessionized
+
+),
+
 final_target_dates as (
 
     select
-        signup_sessionized.event_id,
-        signup_sessionized.event_dt,
-        signup_sessionized.event_at,
-        signup_sessionized.event_ts,
-        signup_sessionized.event_name,
-        signup_sessionized.user_pseudo_id,
-        signup_sessionized.ga_session_id,
-        signup_sessionized.custom_session_id,
-        signup_sessionized.platform,
-        signup_sessionized.device_category,
-        signup_sessionized.device_os,
-        signup_sessionized.device_os_version,
-        signup_sessionized.event_label,
-        signup_sessionized.event_category,
-        signup_sessionized.event_value,
-        signup_sessionized.page_title,
-        signup_sessionized.screen_class,
-        signup_sessionized.engagement_time_msec,
-        signup_sessionized.page_location
-    from signup_sessionized
+        event_label_corrected.event_id,
+        event_label_corrected.event_dt,
+        event_label_corrected.event_at,
+        event_label_corrected.event_ts,
+        event_label_corrected.event_name,
+        event_label_corrected.user_pseudo_id,
+        event_label_corrected.ga_session_id,
+        event_label_corrected.custom_session_id,
+        event_label_corrected.platform,
+        event_label_corrected.device_category,
+        event_label_corrected.device_os,
+        event_label_corrected.device_os_version,
+        event_label_corrected.event_label,
+        event_label_corrected.event_category,
+        event_label_corrected.event_value,
+        event_label_corrected.page_title,
+        event_label_corrected.screen_class,
+        event_label_corrected.engagement_time_msec,
+        event_label_corrected.page_location
+    from event_label_corrected
     cross join date_window
-    where signup_sessionized.event_dt between date_window.target_start_dt and date_window.target_end_dt
+    where event_label_corrected.event_dt between date_window.target_start_dt and date_window.target_end_dt
 
 ),
 
