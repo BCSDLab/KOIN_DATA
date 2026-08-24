@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: silver__users
+    description: >
+      Prod GA4 원천과 KOIN 회원 정보를 결합하는 운영 전환 후보 사용자
+      Dimension이다. 로컬 Airflow 검증에서는 Stage silver 데이터셋에만 적재한다.
+    columns:
+      - name: user_pseudo_id
+        description: GA4 사용자 인스턴스 식별자이자 모델의 논리 PK
+        data_tests:
+          - not_null
+          - unique
+      - name: first_seen_at
+        description: 사용자 상태 산정에 포함된 첫 관측 시각(KST)
+        data_tests:
+          - not_null
+      - name: last_seen_at
+        description: 사용자 상태 산정에 포함된 마지막 관측 시각(KST)
+        data_tests:
+          - not_null
+      - name: user_type
+        description: koin_users의 회원 유형
+      - name: signup_completed_at
+        description: koin_users.created_at 기반 회원가입 완료 시각
+      - name: is_deleted
+        description: koin_users.is_deleted의 정수화 값
+      - name: is_mysql_mapped
+        description: 선정된 user_id가 koin_users에 매핑됐는지 여부
+        data_tests:
+          - not_null
