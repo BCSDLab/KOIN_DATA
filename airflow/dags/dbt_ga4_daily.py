@@ -54,6 +54,8 @@ execution_config = ExecutionConfig(
 )
 
 render_config = RenderConfig(
+    # 태그가 없는 검증·전환 중 모델은 일별 운영 DAG에 자동으로 추가하지 않는다.
+    select=["tag:airflow_daily"],
     # 모델 실행 직후 해당 모델의 test를 돌린다. dbt build와 같은 흐름.
     test_behavior=TestBehavior.AFTER_EACH,
     dbt_executable_path=DBT_EXECUTABLE,
