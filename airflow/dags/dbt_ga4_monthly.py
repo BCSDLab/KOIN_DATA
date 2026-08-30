@@ -14,6 +14,8 @@ import pendulum
 from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
 from cosmos import DbtDag
 from dbt_ga4_common import (
+    SCHEDULE_TIMEZONE,
+    create_cron_schedule,
     create_date_validation_task,
     create_date_vars,
     create_execution_config,
@@ -51,8 +53,8 @@ dbt_ga4_monthly = DbtDag(
         }
     },
     # monthly는 같은 날 09시 daily가 성공한 뒤에 시작한다.
-    schedule="0 12 1 * *",
-    start_date=pendulum.datetime(2026, 9, 1, tz="Asia/Seoul"),
+    schedule=create_cron_schedule("0 12 1 * *"),
+    start_date=pendulum.datetime(2026, 9, 1, tz=SCHEDULE_TIMEZONE),
     catchup=False,
     default_args={
         "retries": 1,

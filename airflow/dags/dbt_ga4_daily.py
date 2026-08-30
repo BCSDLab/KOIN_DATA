@@ -11,6 +11,8 @@ from datetime import timedelta
 import pendulum
 from cosmos import DbtDag
 from dbt_ga4_common import (
+    SCHEDULE_TIMEZONE,
+    create_cron_schedule,
     create_date_validation_task,
     create_date_vars,
     create_execution_config,
@@ -31,8 +33,8 @@ dbt_ga4_daily = DbtDag(
     render_config=create_render_config("airflow_daily"),
     operator_args={"vars": create_date_vars(DAILY_LOOKBACK_DAYS)},
     # 전날 데이터를 KST 오전에 처리한다. GA4 확정 export가 도착할 시간을 준다.
-    schedule="0 9 * * *",
-    start_date=pendulum.datetime(2026, 7, 25, tz="Asia/Seoul"),
+    schedule=create_cron_schedule("0 9 * * *"),
+    start_date=pendulum.datetime(2026, 7, 25, tz=SCHEDULE_TIMEZONE),
     catchup=False,
     default_args={
         "retries": 1,

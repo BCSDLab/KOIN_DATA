@@ -7,12 +7,14 @@ import re
 from typing import Any
 
 from airflow.providers.standard.operators.python import PythonOperator
+from airflow.timetables.trigger import CronTriggerTimetable
 from cosmos import ExecutionConfig, ProfileConfig, ProjectConfig, RenderConfig
 from cosmos.constants import InvocationMode, TestBehavior
 
 DATE_PATTERN = re.compile(r"^\d{8}$")
 
 DBT_PROJECT_DIR = "/opt/airflow/dbt"
+SCHEDULE_TIMEZONE = "Asia/Seoul"
 
 # Airflow 본체와 라이브러리를 섞지 않기 위해 dbt는 별도 venv에 격리해 두었다.
 DBT_EXECUTABLE = "/home/airflow/dbt-venv/bin/dbt"
@@ -56,6 +58,11 @@ def create_render_config(model_tag: str) -> RenderConfig:
         invocation_mode=InvocationMode.SUBPROCESS,
         select=[f"tag:{model_tag}"],
     )
+
+
+def create_cron_schedule(cron_expression: str) -> CronTriggerTimetable:
+    """실행 시각과 logical date가 같은 cron timetable을 명시적으로 사용한다."""
+    return CronTriggerTimetable(cron_expression, timezone=SCHEDULE_TIMEZONE)
 
 
 def create_date_vars(lookback_days: int) -> dict[str, str]:
