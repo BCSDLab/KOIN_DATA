@@ -6,6 +6,8 @@ models:
       GA4 확정 일별 Export를 이벤트 grain으로 정제한 Silver 증분 테이블.
       raw_event_id 물리 중복 제거와 event_id 논리 중복 제거를 UNNEST 전에 수행하고,
       공통 이벤트 파라미터·KST 시간·화면명·Android 가입 세션을 표준화한다.
+    config:
+      tags: ["airflow_daily"]
     columns:
       - name: raw_event_id
         description: 전송·배치 위치, user_pseudo_id, canonical event_params로 생성한 원천 물리 행의 SHA256 식별자
