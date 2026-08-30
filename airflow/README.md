@@ -8,7 +8,9 @@ dbt 모델 실행은 [Cosmos](https://astronomer.github.io/astronomer-cosmos/)�
 ```
 airflow/
 ├── dags/            # DAG 파일 (평평하게 둔다)
-│   └── dbt_ga4_daily.py
+│   ├── dbt_ga4_common.py
+│   ├── dbt_ga4_daily.py
+│   └── dbt_ga4_monthly.py
 ├── plugins/         # Airflow 플러그인
 └── logs/            # 런타임 산출물, Git에 커밋하지 않는다
 ```
@@ -59,16 +61,24 @@ dbt는 Airflow 본체와 파이썬 라이브러리를 공유하지 않도록 별
 
 처리 날짜는 **항상 Airflow가 정하고** dbt에 `--vars`로 넘긴다.
 
-| 실행 | 범위 |
-| --- | --- |
-| 스케줄 | `data_interval_start` 기준 최근 3일 |
-| 수동 (Trigger DAG w/ config) | conf로 넘긴 `start_date` ~ `end_date` |
+| 실행 | 선택 태그 | 범위 |
+| --- | --- | --- |
+| daily (`dbt_ga4_daily`) | `airflow_daily` | `data_interval_start` 기준 최근 3일 |
+| monthly (`dbt_ga4_monthly`) | `airflow_monthly` | 매월 1일, 전날까지 최근 30일 |
+| 수동 (Trigger DAG w/ config) | 해당 DAG의 태그 | conf로 넘긴 `start_date` ~ `end_date` |
 
-GA4는 확정 데이터를 며칠에 걸쳐 갱신하므로 매 실행 최근 3일을 다시 만든다.
+GA4는 확정 데이터를 며칠에 걸쳐 갱신하므로 daily는 최근 3일을 다시 만든다.
 모델이 `insert_overwrite`라 파티션이 통째로 교체되어 추가뿐 아니라 삭제·변경도 반영된다.
 
-전체 적재(분석 시작일 `20240711`부터)도 수동 실행으로 날짜를 명시해서 돌린다.
-2년치 스캔이 실수로 발생하지 않도록 자동 분기를 두지 않는다.
+monthly는 1일 12시(KST)에 시작하며, 같은 날 09시 daily DAG의 성공을 먼저 확인한다.
+따라서 두 DAG가 같은 파티션이나 사용자 행을 동시에 쓰지 않는다. 월간 실행은
+`reconcile_window=true`를 함께 넘긴다. 이때 `silver__users`의 기존 행은
+`first_seen_at`, `last_seen_at`, `gender`, `major`만 보정한다.
+
+전환 후보 모델의 최초 전체 적재는 daily DAG를 수동 실행하지 않고, 운영에서
+`silver_events_v2`와 `silver__users`만 명시 선택해 별도로 수행한다. daily 태그에는
+기존 `silver_events`도 포함되므로, 최초 적재를 위해 기존 테이블까지 다시 쓰지 않기
+위해서다. 전체 적재 날짜 범위는 반드시 명시하고 실행 전 비용을 확인한다.
 
 ```json
 {"start_date": "20240711", "end_date": "20260725"}
