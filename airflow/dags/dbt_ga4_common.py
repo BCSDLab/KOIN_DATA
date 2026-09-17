@@ -50,8 +50,8 @@ def create_execution_config() -> ExecutionConfig:
 
 def create_render_config(model_tag: str) -> RenderConfig:
     """최초 적재 완료 전에는 전환 후보를 제외하고 태그 모델을 렌더링한다."""
-    # 테이블 존재만으로는 전체 이력 적재를 보장할 수 없다. 두 후보 모델의
-    # 최초 적재와 검증을 마친 뒤 배포 환경에서 명시적으로 활성화한다.
+    # 테이블 존재만으로는 전체 이력 적재를 보장할 수 없다. 최초 적재가 필요한
+    # 모델은 dbt 태그로 표시하고, 적재·검증 후 배포 환경에서 활성화한다.
     bootstrap_complete = (
         os.getenv("KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE", "false").strip().lower()
         == "true"
@@ -63,7 +63,7 @@ def create_render_config(model_tag: str) -> RenderConfig:
         # DAG 파싱 시점의 dbt ls도 별도 프로세스에서 돌린다.
         invocation_mode=InvocationMode.SUBPROCESS,
         select=[f"tag:{model_tag}"],
-        exclude=[] if bootstrap_complete else ["silver_events_v2", "silver__users"],
+        exclude=[] if bootstrap_complete else ["tag:initial_load_required"],
     )
 
 

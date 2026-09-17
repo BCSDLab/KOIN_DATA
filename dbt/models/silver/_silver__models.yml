@@ -93,7 +93,7 @@ models:
       raw_event_id 물리 중복 제거와 event_id 논리 중복 제거를 UNNEST 전에 수행하고,
       공통 이벤트 파라미터·KST 시간·화면명·Android 가입 세션을 표준화한다.
     config:
-      tags: ["airflow_daily", "airflow_monthly"]
+      tags: ["airflow_daily", "airflow_monthly", "initial_load_required"]
     columns:
       - name: event_id
         description: 사용자·시각·이벤트 내용으로 생성하고 논리 중복을 제거한 Silver PK
@@ -179,7 +179,7 @@ models:
       Prod GA4 원천과 KOIN 회원 정보를 결합하는 운영 전환 후보 사용자
       Dimension이다. 로컬 Airflow 검증에서는 Stage silver 데이터셋에만 적재한다.
     config:
-      tags: ["airflow_daily", "airflow_monthly"]
+      tags: ["airflow_daily", "airflow_monthly", "initial_load_required"]
     columns:
       - name: user_pseudo_id
         description: GA4 사용자 인스턴스 식별자이자 모델의 논리 PK

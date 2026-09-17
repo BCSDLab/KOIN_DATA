@@ -83,8 +83,9 @@ monthly는 1일 12시(KST)에 시작하며, 같은 날 09시 daily DAG의 성공
 ### 전환 후보 모델의 최초 적재와 스케줄 활성화
 
 `KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE`는 기본값이 `false`다. 미설정이거나
-`true`가 아니면 daily/monthly의 태그 선택에서 `silver_events_v2`와
-`silver__users`를 제외한다. 두 모델의 테스트도 생성하지 않는다. 따라서 기존
+`true`가 아니면 daily/monthly에서 `initial_load_required` 태그 모델을 제외한다.
+대상은 dbt YAML의 태그로 관리하며, 현재는 `silver_events_v2`와
+`silver__users`다. 두 모델의 테스트도 생성하지 않는다. 따라서 기존
 daily의 `silver_events`는 계속 실행하지만, 후보 테이블이 최근 3일치만으로
 생성되거나 `silver__users`의 최초 운영 적재 보호에 걸리는 상황은 막는다.
 monthly는 이때 dbt 모델을 실행하지 않으므로 최초 적재 전에는 일시정지해 둔다.
@@ -103,6 +104,8 @@ monthly는 이때 dbt 모델을 실행하지 않으므로 최초 적재 전에�
 
 이 설정은 해당 출력 환경의 적재 완료를 운영자가 확인했다는 표시다. 출력 환경을
 바꾸거나 후보 테이블을 다시 만들 때는 먼저 `false`로 되돌리고 위 절차를 반복한다.
+최초 적재가 필요한 모델을 추가할 때도 먼저 설정을 `false`로 반영한 뒤 해당 모델에
+`initial_load_required` 태그를 붙인다. 이 설정은 태그 모델 전체에 공통으로 적용된다.
 
 날짜 범위 지정 예시:
 
