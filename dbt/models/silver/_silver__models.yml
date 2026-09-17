@@ -169,10 +169,31 @@ models:
         description: 정규화된 이벤트 속성으로 분류한 KOIN 서비스명입니다.
         data_tests:
           - not_null
+      - name: funnel_stage
+        description: >
+          서비스와 이벤트 속성으로 분류한 퍼널 단계명입니다.
+          main 서비스는 main이며, 분류 규칙에 해당하지 않는 이벤트는 NULL입니다.
+      - name: step_order
+        description: >
+          서비스별 퍼널 단계에 부여한 논리적 순서입니다. 실제 이벤트 발생 순서가 아닙니다.
+          main 단계는 0, 나머지 정의된 단계는 1~5이며, 매핑되지 않은 단계는 NULL입니다.
+      - name: is_entry_event
+        description: >
+          funnel_stage가 entry이면 TRUE, 그 외 분류된 단계이면 FALSE입니다.
+          funnel_stage가 NULL이면 NULL이며, signup_start나 login_entry는 TRUE에 포함되지 않습니다.
+      - name: is_core_action
+        description: >
+          서비스별 핵심 행동(게시글 읽기, 상점 전화, 식단 공유, 버스 검색,
+          동아리 상세 조회, 배너 클릭, 시간표 저장, 회원가입 완료)이면 TRUE입니다.
+          그 외 분류된 단계는 FALSE이며, funnel_stage가 NULL이면 NULL입니다.
       - name: stage_scope
         description: main 이벤트는 global, 그 외 서비스 이벤트는 service입니다.
         data_tests:
           - not_null
+      - name: service_step_order
+        description: >
+          서비스 내부 퍼널 분석용 단계 순서입니다. main 서비스는 NULL이고,
+          그 외 서비스는 step_order를 그대로 사용하므로 매핑되지 않은 단계도 NULL입니다.
 
   - name: silver__users
     description: >
