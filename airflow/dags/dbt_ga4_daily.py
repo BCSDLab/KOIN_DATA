@@ -1,7 +1,8 @@
 """GA4 Silver 모델을 일별 증분 처리하는 dbt 파이프라인.
 
-`airflow_daily` 태그 모델만 Cosmos task로 렌더링한다. 현재는 기존
-silver_events와 전환 후보인 silver_events_v2, silver__users를 함께 실행한다.
+`airflow_daily` 태그 모델을 Cosmos task로 렌더링한다. 기본은 기존
+silver_events만 실행하고, 최초 적재 완료 설정을 켠 뒤에만 전환 후보인
+silver_events_v2, silver__users를 함께 실행한다.
 """
 
 from __future__ import annotations

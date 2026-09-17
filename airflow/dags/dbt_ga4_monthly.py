@@ -3,6 +3,7 @@
 `airflow_monthly` 태그 모델만 실행한다. silver_events_v2는 최근 30일
 파티션을 다시 만들고, silver__users는 reconcile_window=true로 실행해 기존
 사용자의 first_seen_at, last_seen_at, gender, major만 보정한다.
+최초 적재 완료 설정을 켜기 전에는 두 후보의 dbt task를 만들지 않는다.
 """
 
 from __future__ import annotations
