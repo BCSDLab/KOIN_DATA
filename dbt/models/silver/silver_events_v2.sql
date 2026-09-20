@@ -1,7 +1,5 @@
 {#-
   최종 Silver 이벤트 계약의 운영 V2 모델.
-  날짜 처리와 모델 설정은 현재 Lightsail 운영 silver_events의 원본 흐름을 따른다.
-
   처리 범위는 호출자(Airflow 또는 사람)가 정한다.
 
     * 기본     : vars 없이 실행하면 최근 3일(어제 기준)을 다시 계산해 교체
@@ -9,28 +7,10 @@
     * 전체 적재: 분석 시작일을 명시한다
                  --vars '{"start_date":"20240711","end_date":"YYYYMMDD"}'
 
-  개선 후보 (원본 동작을 유지하기 위해 현재는 적용하지 않음):
-
-    * Airflow 실행은 항상 start_date/end_date를 넘겨 재시도·백필 범위를 고정한다.
-      현재 live dbt_ga4_daily도 이 방식으로 실행한다.
-    * insert_overwrite는 결과가 0건인 요청일의 기존 파티션을 자동으로 비우지 않는다.
-      날짜 계약과 Cosmos 파싱을 함께 검증한 뒤 정적 partitions 설정을 다시 도입할 수 있다.
+    * Airflow가 넘긴 start_date/end_date를 조회 범위와 교체 파티션에 함께 사용한다.
+      결과가 0건인 요청일도 기존 파티션을 비운다. 범위 밖 파티션은 교체하지 않는다.
     * GA4 원천부터 독립적으로 계산하므로 기존 silver_events를 참조하지 않는다.
 -#}
-{{
-    config(
-        materialized='incremental',
-        incremental_strategy='insert_overwrite',
-        partition_by={
-            'field': 'event_dt',
-            'data_type': 'date',
-            'granularity': 'day'
-        },
-        cluster_by=['event_id', 'user_pseudo_id', 'event_name'],
-        on_schema_change='fail'
-    )
-}}
-
 {% set ANALYSIS_START_DATE = '20240711' %}
 {% set LOOKBACK_DAYS = 3 %}
 {% set SIGNUP_LOOKBACK_MINUTES = 15 %}
@@ -43,15 +23,16 @@
 {#-
   안전 보완: 두 값은 SQL 리터럴로 직접 삽입되므로 숫자 8자리만 허용한다.
   길이만 검사하면 `1' or '1`처럼 8자짜리 문자열이 통과해 SQL을 벗어날 수 있다.
-  값이 없을 때는 오류를 내지 않아 Cosmos의 dbt ls 파싱도 허용한다.
+  두 변수를 모두 생략한 경우에만 기본 범위를 사용하므로 Cosmos의 dbt ls도 허용한다.
+  빈 문자열을 명시한 경우에는 자동 범위로 바꾸지 않고 실패한다.
 -#}
-{% if (start_date and not end_date) or (end_date and not start_date) %}
+{% if (start_date_var is not none or end_date_var is not none) and (not start_date or not end_date) %}
     {{ exceptions.raise_compiler_error('start_date와 end_date는 반드시 함께 지정해야 합니다.') }}
 {% endif %}
 
 {% if start_date and end_date %}
     {% for value in [start_date, end_date] %}
-        {% if not modules.re.match('^[0-9]{8}$', value) %}
+        {% if not modules.re.fullmatch('[0-9]{8}', value) %}
             {{ exceptions.raise_compiler_error(
                 "start_date와 end_date는 숫자 8자리(YYYYMMDD)여야 합니다. 받은 값: '" ~ value ~ "'"
             ) }}
@@ -62,13 +43,45 @@
     {% endif %}
 {% endif %}
 
+{#-
+  결과에 등장한 날짜가 아니라 요청한 모든 날짜를 교체한다.
+  config는 dbt 파싱 단계에도 필요하므로 execute 조건으로 감싸지 않는다.
+  strptime으로 실제 달력 날짜까지 검증한 뒤 양 끝을 포함한 DATE 리터럴을 만든다.
+-#}
+{% set partitions_to_replace = [] %}
 {% if start_date and end_date %}
+    {% set start_day = modules.datetime.datetime.strptime(start_date, '%Y%m%d').date() %}
+    {% set end_day = modules.datetime.datetime.strptime(end_date, '%Y%m%d').date() %}
+    {% for offset in range((end_day - start_day).days + 1) %}
+        {% set partition_day = start_day + modules.datetime.timedelta(days=offset) %}
+        {% do partitions_to_replace.append("date '" ~ partition_day.isoformat() ~ "'") %}
+    {% endfor %}
     {% set target_start_sql = "parse_date('%Y%m%d', '" ~ start_date ~ "')" %}
     {% set target_end_sql = "parse_date('%Y%m%d', '" ~ end_date ~ "')" %}
 {% else %}
+    {% for offset in range(1, LOOKBACK_DAYS + 1) %}
+        {% do partitions_to_replace.append(
+            "date_sub(current_date('Asia/Seoul'), interval " ~ offset ~ " day)"
+        ) %}
+    {% endfor %}
     {% set target_start_sql = "date_sub(current_date('Asia/Seoul'), interval " ~ LOOKBACK_DAYS ~ " day)" %}
     {% set target_end_sql = "date_sub(current_date('Asia/Seoul'), interval 1 day)" %}
 {% endif %}
+
+{{
+    config(
+        materialized='incremental',
+        incremental_strategy='insert_overwrite',
+        partition_by={
+            'field': 'event_dt',
+            'data_type': 'date',
+            'granularity': 'day'
+        },
+        partitions=partitions_to_replace,
+        cluster_by=['event_id', 'user_pseudo_id', 'event_name'],
+        on_schema_change='fail'
+    )
+}}
 
 {#-
   Android 가입 세션은 시작 시각보다 앞선 이벤트를 상속해야 하므로 범위 앞쪽을
