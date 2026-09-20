@@ -30,6 +30,7 @@
 {% set end_date_var = var('end_date', none) %}
 {% set start_date = start_date_var | string if start_date_var is not none else none %}
 {% set end_date = end_date_var | string if end_date_var is not none else none %}
+{% set reconcile_window = var('reconcile_window', false) %}
 {# compile 시 존재하지 않는 대상 테이블을 참조하지 않도록 하는 전용 변수 #}
 {% set incremental_mode = is_incremental() or var('_compile_incremental', false) %}
 
@@ -49,6 +50,14 @@
     {% if start_date > end_date %}
         {{ exceptions.raise_compiler_error('start_date가 end_date보다 늦을 수 없습니다.') }}
     {% endif %}
+{% endif %}
+
+{#- 월간 보정은 기존 누적 상태가 있어야만 안전하게 적용할 수 있다. -#}
+{% if execute and reconcile_window and not incremental_mode %}
+    {{ exceptions.raise_compiler_error(
+        'silver__users 월간 보정은 최초 적재에 사용할 수 없습니다. '
+        ~ '먼저 reconcile_window=false로 전체 GA4 이력을 적재하세요.'
+    ) }}
 {% endif %}
 
 {#- Prod 최초 실행이 최근 3일 기본값으로 불완전하게 생성되는 것을 막는다. -#}
@@ -106,7 +115,11 @@ with existing_users as (
         last_seen_at,
         user_id_support_count,
         source_event_count,
-        property_user_id_set_ts
+        property_user_id_set_ts,
+        user_type,
+        signup_completed_at,
+        is_deleted,
+        is_mysql_mapped
     from {{ this }}
     {% else %}
     select
@@ -124,7 +137,11 @@ with existing_users as (
         cast(null as datetime) as last_seen_at,
         cast(null as int64) as user_id_support_count,
         cast(null as int64) as source_event_count,
-        cast(null as int64) as property_user_id_set_ts
+        cast(null as int64) as property_user_id_set_ts,
+        cast(null as string) as user_type,
+        cast(null as timestamp) as signup_completed_at,
+        cast(null as int64) as is_deleted,
+        cast(null as bool) as is_mysql_mapped
     from (select 1) as empty_source
     where false
     {% endif %}
@@ -206,7 +223,7 @@ source_filtered as (
       and _table_suffix between {{ scan_start_sql }} and {{ scan_end_sql }}
       and date(timestamp_micros(e.event_timestamp), 'Asia/Seoul') between
           {{ target_start_sql }} and {{ target_end_sql }}
-      {% if incremental_mode %}
+      {% if incremental_mode and not reconcile_window %}
       and (
           existing_users.user_pseudo_id is null
           or datetime(
@@ -673,8 +690,143 @@ ga4_users as (
 
 ),
 
+{% if reconcile_window %}
+monthly_attributes as (
+
+    select
+        user_pseudo_id,
+        min(event_at) as monthly_first_seen_at,
+        max(event_at) as monthly_last_seen_at,
+        array_agg(
+            gender ignore nulls
+            order by event_at desc, identity_observation_id
+            limit 1
+        )[safe_offset(0)] as monthly_gender,
+        array_agg(
+            major ignore nulls
+            order by event_at desc, identity_observation_id
+            limit 1
+        )[safe_offset(0)] as monthly_major
+    from identity_observations_deduped
+    group by user_pseudo_id
+
+),
+
+monthly_reconciled_existing_prepared as (
+
+    select
+        existing_users.user_pseudo_id,
+        existing_users.stream_id,
+        existing_users.user_id,
+        existing_users.user_id_source,
+        existing_users.top_user_id,
+        existing_users.property_user_id,
+        existing_users.param_user_id,
+        coalesce(
+            monthly_attributes.monthly_gender,
+            existing_users.gender
+        ) as gender,
+        coalesce(
+            monthly_attributes.monthly_major,
+            existing_users.major
+        ) as major,
+        existing_users.entry_year,
+        case
+            when existing_users.first_seen_at is null
+                then monthly_attributes.monthly_first_seen_at
+            else least(
+                existing_users.first_seen_at,
+                monthly_attributes.monthly_first_seen_at
+            )
+        end as first_seen_at,
+        case
+            when existing_users.last_seen_at is null
+                then monthly_attributes.monthly_last_seen_at
+            else greatest(
+                existing_users.last_seen_at,
+                monthly_attributes.monthly_last_seen_at
+            )
+        end as last_seen_at,
+        existing_users.user_id_support_count,
+        existing_users.source_event_count,
+        existing_users.property_user_id_set_ts,
+        safe_cast(
+            regexp_extract(existing_users.user_id, r'_(\d+)\s*$')
+            as int64
+        ) as user_id_mysql,
+        existing_users.user_type as persisted_user_type,
+        existing_users.signup_completed_at as persisted_signup_completed_at,
+        existing_users.is_deleted as persisted_is_deleted,
+        existing_users.is_mysql_mapped as persisted_is_mysql_mapped,
+        true as is_monthly_existing,
+        existing_users.first_seen_at as previous_first_seen_at,
+        existing_users.last_seen_at as previous_last_seen_at,
+        existing_users.gender as previous_gender,
+        existing_users.major as previous_major
+    from existing_users
+    inner join monthly_attributes using (user_pseudo_id)
+
+),
+
+monthly_reconciled_existing as (
+
+    select * except (
+        previous_first_seen_at,
+        previous_last_seen_at,
+        previous_gender,
+        previous_major
+    )
+    from monthly_reconciled_existing_prepared
+    where first_seen_at is distinct from previous_first_seen_at
+       or last_seen_at is distinct from previous_last_seen_at
+       or gender is distinct from previous_gender
+       or major is distinct from previous_major
+
+),
+
+monthly_new_users as (
+
+    {#-
+      월간 보정은 기존 사용자의 identity/count를 동결한다. 다만 일간 실행이
+      누락됐더라도 최근 구간에서 처음 보인 사용자는 일반 증분 계산 결과로 삽입한다.
+    -#}
+    select
+        ga4_users.*,
+        cast(null as string) as persisted_user_type,
+        cast(null as timestamp) as persisted_signup_completed_at,
+        cast(null as int64) as persisted_is_deleted,
+        cast(null as bool) as persisted_is_mysql_mapped,
+        false as is_monthly_existing
+    from ga4_users
+    left join existing_users using (user_pseudo_id)
+    where existing_users.user_pseudo_id is null
+
+),
+
+users_to_enrich as (
+
+    select * from monthly_reconciled_existing
+    union all
+    select * from monthly_new_users
+
+),
+
+{% else %}
+users_to_enrich as (
+
+    select * from ga4_users
+
+),
+
+{% endif %}
 mysql_users as (
 
+    {#-
+      월간 보정의 기존 사용자는 MySQL 속성을 저장된 값으로 유지한다.
+      app_db.koin_users가 최신 스냅샷임이 운영적으로 보장되면,
+      user_type, signup_completed_at, is_deleted, is_mysql_mapped는
+      GA4 보정과 분리한 비교 CTE를 추가해 별도로 최신화할 수 있다.
+    -#}
     select
         safe_cast(id as int64) as id,
         user_type,
@@ -687,28 +839,51 @@ mysql_users as (
 final as (
 
     select
-        ga4_users.user_pseudo_id,
-        ga4_users.stream_id,
-        ga4_users.user_id,
-        ga4_users.user_id_source,
-        ga4_users.top_user_id,
-        ga4_users.property_user_id,
-        ga4_users.param_user_id,
-        ga4_users.gender,
-        ga4_users.major,
-        ga4_users.entry_year,
-        ga4_users.first_seen_at,
-        ga4_users.last_seen_at,
-        ga4_users.user_id_support_count,
-        ga4_users.source_event_count,
-        ga4_users.property_user_id_set_ts,
+        users_to_enrich.user_pseudo_id,
+        users_to_enrich.stream_id,
+        users_to_enrich.user_id,
+        users_to_enrich.user_id_source,
+        users_to_enrich.top_user_id,
+        users_to_enrich.property_user_id,
+        users_to_enrich.param_user_id,
+        users_to_enrich.gender,
+        users_to_enrich.major,
+        users_to_enrich.entry_year,
+        users_to_enrich.first_seen_at,
+        users_to_enrich.last_seen_at,
+        users_to_enrich.user_id_support_count,
+        users_to_enrich.source_event_count,
+        users_to_enrich.property_user_id_set_ts,
+        {% if reconcile_window %}
+        case
+            when users_to_enrich.is_monthly_existing
+                then users_to_enrich.persisted_user_type
+            else mysql_users.user_type
+        end as user_type,
+        case
+            when users_to_enrich.is_monthly_existing
+                then users_to_enrich.persisted_signup_completed_at
+            else mysql_users.signup_completed_at
+        end as signup_completed_at,
+        case
+            when users_to_enrich.is_monthly_existing
+                then users_to_enrich.persisted_is_deleted
+            else mysql_users.is_deleted
+        end as is_deleted,
+        case
+            when users_to_enrich.is_monthly_existing
+                then users_to_enrich.persisted_is_mysql_mapped
+            else mysql_users.id is not null
+        end as is_mysql_mapped
+        {% else %}
         mysql_users.user_type,
         mysql_users.signup_completed_at,
         mysql_users.is_deleted,
         mysql_users.id is not null as is_mysql_mapped
-    from ga4_users
+        {% endif %}
+    from users_to_enrich
     left join mysql_users
-        on ga4_users.user_id_mysql = mysql_users.id
+        on users_to_enrich.user_id_mysql = mysql_users.id
 
 )
 
