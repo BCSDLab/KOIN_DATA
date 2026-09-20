@@ -10,7 +10,8 @@ airflow/
 ├── dags/            # DAG 파일 (평평하게 둔다)
 │   ├── dbt_ga4_common.py
 │   ├── dbt_ga4_daily.py
-│   └── dbt_ga4_monthly.py
+│   ├── dbt_ga4_monthly.py
+│   └── dbt_ga4_monthly_dates.py
 ├── plugins/         # Airflow 플러그인
 └── logs/            # 런타임 산출물, Git에 커밋하지 않는다
 ```
@@ -64,8 +65,9 @@ dbt는 Airflow 본체와 파이썬 라이브러리를 공유하지 않도록 별
 | 실행 | 선택 태그 | 범위 |
 | --- | --- | --- |
 | daily (`dbt_ga4_daily`) | `airflow_daily` | `data_interval_start` 기준 최근 3일 |
-| monthly (`dbt_ga4_monthly`) | `airflow_monthly` | 매월 1일, 전날까지 최근 30일 |
-| 수동 (Trigger DAG w/ config) | 해당 DAG의 태그 | conf로 넘긴 `start_date` ~ `end_date` |
+| monthly (`dbt_ga4_monthly`) | `airflow_monthly` | 예정 실행일 30일 전 ~ 실제 실행일의 어제 |
+| daily 수동 (Trigger DAG w/ config) | `airflow_daily` | conf로 넘긴 `start_date` ~ `end_date` |
+| monthly 수동 | `airflow_monthly` | 현재 월 1일의 30일 전 ~ 실제 실행일의 어제. 날짜 직접 지정 금지 |
 
 GA4는 확정 데이터를 며칠에 걸쳐 갱신하므로 daily는 최근 3일을 다시 만든다.
 `silver_events_v2`는 Airflow의 `start_date` ~ `end_date`를 조회 범위와
@@ -78,10 +80,25 @@ GA4는 확정 데이터를 며칠에 걸쳐 갱신하므로 daily는 최근 3일
 기존 `silver_events`는 동적 파티션 교체를 유지한다. 결과에 존재하는 날짜의
 삭제·변경만 반영하며, 결과가 0건인 날짜의 기존 파티션은 비워지지 않는다.
 
-monthly는 1일 12시(KST)에 시작하며, 같은 날 09시 daily DAG의 성공을 먼저 확인한다.
-따라서 두 DAG가 같은 파티션이나 사용자 행을 동시에 쓰지 않는다. 월간 실행은
-`reconcile_window=true`를 함께 넘긴다. 이때 `silver__users`의 기존 행은
+monthly는 매월 1일 12시(KST), daily는 매일 09시(KST)에 예약된다.
+monthly의 `validate_dates`는 실행 시점에 날짜 범위를 확정하고 XCom으로 전달한다.
+지연 실행에서는 시작일을 유지하고 종료일만 실제 실행일의 어제까지 확장한다.
+예를 들어 9월 1일 예정 실행이 9월 5일에 시작되면 8월 2일~9월 4일을 처리하며,
+원래 예정일이 아닌 **9월 5일 09시 daily**의 성공을 기다린다. 센서와 dbt 작업은
+동일한 날짜 계획을 사용한다. 월간 실행은 `reconcile_window=true`를 함께 넘긴다.
+이때 `silver__users`의 기존 행은
 `first_seen_at`, `last_seen_at`, `gender`, `major`만 보정한다.
+
+monthly의 conf에 `start_date` 또는 `end_date`가 있으면 빈 값이라도 실행을 거부한다.
+과거 속성이 현재 값을 덮어쓰는 과거 기간 수동 보정을 막기 위해서다. 날짜 설정 없이
+수동 실행하면 현재 월을 기준으로 위 규칙을 적용한다. 직접 dbt CLI 실행은 이 DAG의
+검증을 거치지 않으므로 과거 구간에 `reconcile_window=true`를 사용하지 않는다.
+
+날짜 계획 이후 KST 날짜가 바뀌면 센서와 dbt 템플릿 검증에서 실패한다. 며칠 뒤
+재실행할 때는 **`validate_dates`부터 모든 downstream task를 함께 clear**하여
+종료일을 다시 확장하고 해당 실행일의 daily 성공을 확인한다. 실패한 dbt task만
+재실행해서는 날짜 계획이 갱신되지 않는다. 날짜를 넘겨 이미 실행 중인 쿼리나 별도
+수동 daily 실행까지 이 센서가 상호 배제하는 것은 아니므로 중복 실행은 피한다.
 
 전환 후보 모델의 최초 전체 적재는 daily DAG를 수동 실행하지 않고, 운영에서
 `silver_events_v2`와 `silver__users`만 명시 선택해 별도로 수행한다. daily 태그에는
