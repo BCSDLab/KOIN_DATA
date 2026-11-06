@@ -8,7 +8,7 @@ definitions as (
   {% endfor %}
 ),
 steps as (
-  select e.user_pseudo_id,e.event_time,d.funnel_id,d.total_steps,
+  select e.user_pseudo_id,e.event_time,e.platform,d.funnel_id,d.total_steps,
     to_hex(sha256(to_json_string(struct(e.user_pseudo_id,e.ga_session_id)))) as session_key,
     case when e.service_name='main' and e.funnel_stage='main' then 1
       when d.funnel_id='signup' then e.service_step_order else e.service_step_order+1 end as step_no
@@ -52,3 +52,12 @@ select 'funnel_duplicate',count(*) from (
   select user_pseudo_id,session_key,funnel_id,funnel_version from facts
   group by 1,2,3,4 having count(*)!=1
 ) having count(*)>0
+union all
+select 'unsupported_funnel_marked_complete',count(*) from facts f
+join (select user_pseudo_id,session_key,max(platform) as platform from steps group by 1,2) q
+using(user_pseudo_id,session_key)
+left join ({{ gold_funnel_support() }}) s on s.funnel_id=f.funnel_id and s.platform=q.platform
+cross join gold_parameters p
+where f.is_complete and (not coalesce(s.supported,false) or not p.funnel_support_verified
+  or (f.funnel_id!='signup' and (not p.main_visit_verified or q.platform not in unnest(p.main_visit_platforms))))
+having count(*)>0

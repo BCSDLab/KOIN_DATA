@@ -16,7 +16,8 @@ from gold_schema import TABLES, schema_sql
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGE = 'koin-stage-438512'
-GATES = ('logging_deployed', 'coverage_verified', 'signup_verified', 'mapping_verified', 'session_verified')
+GATES = ('logging_deployed', 'coverage_verified', 'signup_verified', 'mapping_verified',
+         'session_verified', 'main_visit_verified', 'funnel_support_verified')
 VALIDATION_NAMES = (
     'assert_gold_44_20_input', 'assert_gold_44_20_naming',
     'assert_gold_44_20_new_mapping_examples', 'assert_gold_44_20_invariants',
@@ -28,6 +29,7 @@ ARTIFACTS = {
     **{n: Path('models/gold') / (n+'.sql') for n in TABLES},
     **{n: Path('tests') / (n+'.sql') for n in VALIDATION_NAMES},
     'gold_input_quality': Path('analyses/gold_input_quality.sql'),
+    'gold_funnel_support_catalog': Path('analyses/gold_funnel_support_catalog.sql'),
 }
 
 
@@ -105,7 +107,12 @@ def validate_contract(p, publish=False):
         if type(p.get(key)) is not int or p[key] < 0:
             raise ValueError(f'{key}: non-negative integer required')
     validate_naming_scope(p, publish)
+    platforms = p.get('main_visit_platforms', [])
+    if not isinstance(platforms,list) or any(v not in ('WEB','ANDROID','IOS') for v in platforms):
+        raise ValueError('Explicit main_visit_platforms required')
     if publish:
+        if not platforms:
+            raise ValueError('Publication blocked: main_visit_platforms required')
         blocked = [g for g in GATES if p[g] is not True]
         if blocked:
             raise ValueError('Publication blocked: ' + ', '.join(blocked))
@@ -243,7 +250,8 @@ def publication_sql(p, target):
             raise ValueError('Unbound live Gold reference in candidate test: '+name)
         sql.append(f'ASSERT NOT EXISTS(\n{check}\n) AS "{name}";')
     sql += [f'CREATE TEMP TABLE gold_input_quality_candidate AS (\n{queries["gold_input_quality"]}\n);',
-            'SELECT * FROM gold_input_quality_candidate ORDER BY event_dt,platform,reason;']
+            'SELECT * FROM gold_input_quality_candidate ORDER BY event_dt,platform,reason;',
+            queries['gold_funnel_support_catalog']+';']
     u = 'mart_kpi_user_daily_candidate'
     m = 'mart_service_metrics_daily_candidate'
     sql += [

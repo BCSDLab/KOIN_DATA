@@ -1,5 +1,5 @@
 {{ config(tags=['gold_44_20_fixture']) }}
-{% set fixture = {'build_id':'fixture','snapshot_at':'2026-12-01T00:00:00Z','computed_at':'2026-12-01T00:00:00Z','logging_start_dt':'2026-10-01','event_complete_start_dt':'2026-10-01','event_complete_dt':'2026-11-30','metric_start_dt':'2026-10-01','metric_end_dt':'2026-11-30','coverage_verified':true,'signup_verified':true,'mapping_verified':true,'session_verified':true,'session_inactivity_minutes':30,'late_arrival_hours':0} %}
+{% set fixture = {'build_id':'fixture','snapshot_at':'2026-12-01T00:00:00Z','computed_at':'2026-12-01T00:00:00Z','logging_start_dt':'2026-10-01','event_complete_start_dt':'2026-10-01','event_complete_dt':'2026-11-30','metric_start_dt':'2026-10-01','metric_end_dt':'2026-11-30','coverage_verified':true,'signup_verified':true,'mapping_verified':true,'main_visit_platforms':['WEB','ANDROID','IOS'],'main_visit_verified':true,'funnel_support_verified':true,'session_verified':true,'session_inactivity_minutes':30,'late_arrival_hours':0} %}
 with {{ gold_fixture_ctes() }},
 u as ({{ gold_user_query('fixture_events','fixture_users',false,fixture) }}),
 m as ({{ gold_metrics_query('fixture_events','fixture_users',false,fixture) }})

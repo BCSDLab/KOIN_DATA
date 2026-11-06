@@ -20,9 +20,11 @@ session_events as (
 session_quality as (
   select user_pseudo_id,ga_session_id,min(event_time) as first_time,max(event_time) as last_time,
     count(distinct platform) as platform_count,
+    max(platform) as session_platform,
     max(timestamp_diff(event_time,previous_time,second)) as max_gap_seconds
   from session_events group by 1,2
 ),
+funnel_support as ({{ gold_funnel_support() }}),
 funnel_definitions as (
   select 'signup' as funnel_id,'account' as service_name,5 as total_steps
   {% for s in ['shop','bus','cafeteria','timetable','board'] %}
@@ -63,6 +65,8 @@ session_facts as (
       to_hex(sha256(to_json_string(struct(p.user_pseudo_id,p.ga_session_id)))) as session_key,
       date(p.t1,'Asia/Seoul') as anchor_dt,
       (b.coverage_verified and b.mapping_verified and b.session_verified
+        and b.funnel_support_verified and coalesce(s.supported,false)
+        and (p.funnel_id='signup' or (b.main_visit_verified and q.session_platform in unnest(b.main_visit_platforms)))
         and b.inactivity_minutes>0 and b.late_arrival_hours>=0 and q.platform_count=1
         and date(q.first_time,'Asia/Seoul')>=b.complete_start_dt
         and timestamp_add(timestamp_add(q.last_time,interval b.inactivity_minutes minute),
@@ -75,6 +79,7 @@ session_facts as (
       array(select t from unnest([p.t1,p.t2,p.t3,p.t4,p.t5]) t with offset o
         where t is not null order by o) as step_reached_at) as fact
   from path_5 p join session_quality q using(user_pseudo_id,ga_session_id)
+  left join funnel_support s on s.funnel_id=p.funnel_id and s.platform=q.session_platform
   cross join gold_parameters b
 ),
 daily_funnels as (

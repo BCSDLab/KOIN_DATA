@@ -8,6 +8,8 @@
     'funnel_version': 'new_logging_v1_draft',
     'coverage_verified': false, 'signup_verified': false,
     'mapping_verified': false, 'session_verified': false,
+    'main_visit_verified': false, 'funnel_support_verified': false,
+    'main_visit_platforms': [],
     'session_inactivity_minutes': 0, 'late_arrival_hours': 0
   } %}
   {% do p.update(var('gold_build', {})) %}
@@ -42,6 +44,9 @@ gold_parameters as (
     {{ 'true' if p.signup_verified is sameas true else 'false' }} as signup_verified,
     {{ 'true' if p.mapping_verified is sameas true else 'false' }} as mapping_verified,
     {{ 'true' if p.session_verified is sameas true else 'false' }} as session_verified,
+    {{ 'true' if p.main_visit_verified is sameas true else 'false' }} as main_visit_verified,
+    {{ 'true' if p.funnel_support_verified is sameas true else 'false' }} as funnel_support_verified,
+    array<string>[{% for platform in p.main_visit_platforms %}'{{ platform }}'{% if not loop.last %},{% endif %}{% endfor %}] as main_visit_platforms,
     {{ p.session_inactivity_minutes | int }} as inactivity_minutes,
     {{ p.late_arrival_hours | int }} as late_arrival_hours
 ),
