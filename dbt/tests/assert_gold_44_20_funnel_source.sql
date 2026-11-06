@@ -59,5 +59,9 @@ using(user_pseudo_id,session_key)
 left join ({{ gold_funnel_support() }}) s on s.funnel_id=f.funnel_id and s.platform=q.platform
 cross join gold_parameters p
 where f.is_complete and (not coalesce(s.supported,false) or not p.funnel_support_verified
+  or (f.funnel_id='cafeteria' and exists(select 1 from silver_events e where
+    e.user_pseudo_id=f.user_pseudo_id and e.platform='IOS' and e.event_name='DA1'
+    and e.event_label='main__main__more__click' and f.session_key=
+      to_hex(sha256(to_json_string(struct(e.user_pseudo_id,e.ga_session_id))))))
   or (f.funnel_id!='signup' and (not p.main_visit_verified or q.platform not in unnest(p.main_visit_platforms))))
 having count(*)>0

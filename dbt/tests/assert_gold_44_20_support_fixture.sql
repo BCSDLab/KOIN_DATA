@@ -15,7 +15,16 @@ unsupported_events as (
  where e.user_pseudo_id='u4'
 ),
 u as ({{ gold_user_query('unsupported_events','fixture_users',false,fixture) }}),
-no_main_users as ({{ gold_user_query('fixture_events','fixture_users',false,no_main) }})
+no_main_users as ({{ gold_user_query('fixture_events','fixture_users',false,no_main) }}),
+ambiguous_events as (
+ select e.* replace('IOS' as platform,
+   if(service_name='shop','cafeteria',service_name) as service_name,
+   case when funnel_stage='shop_view' then 'explore' when funnel_stage='call' then 'share'
+        else funnel_stage end as funnel_stage,
+   if(funnel_stage='entry','main__main__more__click',event_label) as event_label)
+ from fixture_events e where user_pseudo_id='u4'
+),
+ambiguous_users as ({{ gold_user_query('ambiguous_events','fixture_users',false,fixture) }})
 select 'support_inventory' as violation from unnest([1]) where (select count(*) from support)!=18
 union all
 select 'signup_must_remain_unsupported' from unnest([1]) where exists(
@@ -35,3 +44,11 @@ select 'unsupported_should_be_na' from unnest([1]) where (
  from u cross join unnest(funnel_session_facts) f
  where f.funnel_id=case user_pseudo_id when 'u4' then 'cafeteria'
  when 'u5' then 'timetable' when 'u6' then 'board' end) is not null
+union all
+select 'ambiguous_ios_entry_accepted' from unnest([1]) where exists(
+ select 1 from ambiguous_users cross join unnest(funnel_session_facts) f
+ where f.funnel_id='cafeteria' and f.is_complete)
+union all
+select 'ambiguous_fixture_path_missing' from unnest([1]) where not exists(
+ select 1 from ambiguous_users cross join unnest(funnel_session_facts) f
+ where f.funnel_id='cafeteria' and f.max_step_reached=4)

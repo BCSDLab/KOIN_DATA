@@ -1,7 +1,9 @@
 {# Versioned support policy for the current new-logging contract.
    Unsupported is not zero conversion. Main observation is a separate gate. #}
 {% macro gold_funnel_support() %}
-select * from unnest(array<struct<funnel_id string,platform string,supported bool,reason string>>[
+select *,if(funnel_id='cafeteria' and platform='IOS',
+ 'more_callback_sessions_require_path_evidence','') as route_note
+from unnest(array<struct<funnel_id string,platform string,supported bool,reason string>>[
 {% for f in ['signup','shop','bus','cafeteria','timetable','board'] %}
 {% for p in ['WEB','ANDROID','IOS'] %}
 {% set reason = 'signup_steps_4_5_unverified' if f=='signup' else
