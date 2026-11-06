@@ -6023,3 +6023,47 @@ Gold 실행 계약에 main_visit_verified, main_visit_verified_evidence, main_vi
 모든 합성 실행은 Stage asia-northeast3의 SELECT/임시 테이블이며 실제 Silver/Gold 원천을 대체 입력으로 사용하지 않았다. 일반 모델 dry-run은 문법·참조 확인이고 실제 데이터 정확성 검증이 아니다. 초기 개발 중 실패한 구문/파싱 실행은 통과 근거에 포함하지 않는다. 기존 accepted_values 인자 경고는 남아 있다.
 
 PR #31과 #32는 Draft를 유지한다. #32는 #31 브랜치를 대상으로 하며 #31 처리 후 대상 브랜치와 차이를 다시 확인한다. 다음은 새 SDK 수집 이후 실제 적용 기간·플랫폼/버전·메인/가입 증거·Silver User/세션/완전 구간 검증, Stage Gold 수치·비용·공개/실패 복구 검증이다. 운영 Airflow·실제 테이블 공개·GitHub 병합은 수행하지 않는다.
+
+
+### 6.24 Stage Airflow Silver V2/User 전환 준비 (2026-11-06)
+
+사용자는 Airflow에서 기존 silver_events 대신 silver_events_v2와 silver__users를
+갱신하도록 전환하고, 스케줄링 기간은 기존 silver_events와 동일하게 유지하도록
+요청했다. #32 브랜치 위의 별도 feat/stage-silver-v2-airflow에서 구현한다.
+
+- KOIN_DATA_SILVER_V2_ONLY=false가 기본이다. false일 때 기존 모델 선택/운영 동작은
+  유지한다. true이면 daily/monthly 태그와 두 모델명의 교집합으로 V2/User 및 각
+  모델의 테스트만 선택한다. legacy silver_events, Gold, 합성 검사는 제외한다.
+- Stage dev, 출력 koin-stage-438512, GA4/앱 DB 프로젝트 모두 Stage, 원천 데이터셋
+  명시, BOOTSTRAP_COMPLETE=true가 필요하다. 최초 적재 여부는 사람이 실제 이력과
+  입력 검사를 확인한 뒤 설정하며 테이블 존재만으로 켜지 않는다.
+- DAG 파싱 및 첫 validate_dates task에서 환경을 검사한다. V2로 파싱한 DAG의
+  실행 환경이 옵션 false/운영 원천/최초 적재 미완료로 바뀌면 downstream을 차단한다.
+- 일별은 기존 매일 09:00 KST·어제까지 최근 3일이며 수동 start_date/end_date 동작도
+  유지한다. 월별은 기존 매월 1일 12:00·예정일 30일 전~실제 실행일 어제, 당일
+  09시 daily 성공 대기와 reconcile_window=true 정책을 유지한다.
+- V2 선택 옵션과 새 네이밍 매핑 활성화는 별개다. 새 로깅 적용/Gold 인증 플래그를
+  켜지 않는다. 두 Silver 모델은 별도 쓰기이므로 한쪽 실패 시 양쪽 쓰기를 원자적으로
+  롤백한다고 보장하지 않는다. Gold 연결/공개는 이번 변경에 포함하지 않는다.
+- 저장소 dbt ref에서 legacy Event 직접 의존은 찾지 못했다. 외부 Superset/직접 SQL
+  사용처까지 확인한 것은 아니며 legacy 테이블을 삭제/이름 변경하지 않는다.
+
+현재 Stage 테이블 메타데이터 읽기 전용 확인: silver_events_v2 21,593,491행,
+silver__users 57,732행. 두 테이블 모두 주요 Gold 입력 컬럼이 있고 마지막 수정은
+2026-11-03 09:54 KST다. 앱 DB 원천 analytics_427218788.koin_users도 존재(5,827행),
+테이블 마지막 수정은 2025-11-10이다. 이는 메타데이터 관측이며 최초 전체 이력·실제
+로깅·가입 스냅샷 신선도 검증 완료를 뜻하지 않는다. 새 테이블을 무조건 만들거나
+전체 재적재하지 않고, 기존 이력·원천 준비 상태를 먼저 확인한다.
+
+재현 절차·실행 대상·Stage 환경 예시는 airflow/README.md에 기록했다. 실제 Stage
+.env, 최초 적재 완료/V2 플래그, 컨테이너 또는 운영 스케줄은 변경하지 않았다.
+Docker Engine 연결이 없어 실제 Airflow/Cosmos 컨테이너 DAG 파싱·수동 실행은
+별도 검증으로 남긴다. Python 정책/실제 dbt ls/날짜 회귀 검사는 별도로 기록한다.
+
+검증 결과: Python 회귀 45개 모두 통과(실제 dbt ls 선택6개/16호출, 공개 게이트12개,
+월별 날짜7개, 신규 Stage 환경/일별 날짜9개, 기존 Silver 파티션5개, 매핑6개).
+일별·월별 V2 선택은 정확히 두 모델이고 연결 테스트도 두 모델 범위에만 속한다.
+Gold/합성 검사 및 legacy Event는 제외된다. Airflow Python 구문 검사 통과.
+기존 dbt accepted_values 경고/라이브러리 ResourceWarning은 유지하며, 초기 테스트
+경로가 dbt 플러그인 탐색을 방해한 실패는 수정 후 재실행했고 통과 근거에 포함하지
+않는다. 실제 Airflow 컨테이너 DAG 파싱·수동 실행·스케줄 활성화는 아직 수행하지 않았다.

@@ -3,6 +3,7 @@
 `airflow_daily` 태그 모델을 Cosmos task로 렌더링한다. 기본은 기존
 silver_events만 실행하고, 최초 적재 완료 설정을 켠 뒤에만 전환 후보인
 silver_events_v2, silver__users를 함께 실행한다.
+Stage의 KOIN_DATA_SILVER_V2_ONLY=true에서는 최초 적재 검증 후 두 모델만 실행한다.
 """
 
 from __future__ import annotations

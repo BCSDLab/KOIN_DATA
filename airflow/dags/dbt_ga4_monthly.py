@@ -27,6 +27,12 @@ from dbt_ga4_monthly_dates import (
     monthly_date_var,
     prepare_monthly_window,
 )
+from dbt_ga4_silver_selection import validate_stage_silver_environment, v2_only_enabled
+
+
+def prepare_validated_monthly_window(stage_v2_required=False, **context):
+    validate_stage_silver_environment(require_v2=stage_v2_required)
+    return prepare_monthly_window(**context)
 
 
 dbt_ga4_monthly = DbtDag(
@@ -74,7 +80,8 @@ with dbt_ga4_monthly:
     )
     validate_dates = PythonOperator(
         task_id="validate_dates",
-        python_callable=prepare_monthly_window,
+        python_callable=prepare_validated_monthly_window,
+        op_kwargs={"stage_v2_required": v2_only_enabled()},
     )
     validate_dates >> wait_for_daily
     for _root in _dbt_root_tasks:

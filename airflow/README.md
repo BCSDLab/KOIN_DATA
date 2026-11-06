@@ -11,7 +11,8 @@ airflow/
 │   ├── dbt_ga4_common.py
 │   ├── dbt_ga4_daily.py
 │   ├── dbt_ga4_monthly.py
-│   └── dbt_ga4_monthly_dates.py
+│   ├── dbt_ga4_monthly_dates.py
+│   └── dbt_ga4_silver_selection.py
 ├── plugins/         # Airflow 플러그인
 └── logs/            # 런타임 산출물, Git에 커밋하지 않는다
 ```
@@ -131,6 +132,75 @@ monthly는 이때 dbt 모델을 실행하지 않으므로 최초 적재 전에�
 바꾸거나 후보 테이블을 다시 만들 때는 먼저 `false`로 되돌리고 위 절차를 반복한다.
 최초 적재가 필요한 모델을 추가할 때도 먼저 설정을 `false`로 반영한 뒤 해당 모델에
 `initial_load_required` 태그를 붙인다. 이 설정은 태그 모델 전체에 공통으로 적용된다.
+
+### Stage에서 기존 Event 대신 V2 + User만 실행하기
+
+`KOIN_DATA_SILVER_V2_ONLY`는 기본 false다. false일 때 위의 기존 동작을 그대로
+유지한다. true이면 daily/monthly 모두 태그와 모델명의 교집합으로
+`silver_events_v2`, `silver__users` 두 모델과 그 테스트만 선택한다.
+기존 `silver_events`·Gold·합성 테스트는 선택하지 않는다. 기존 테이블을 삭제하거나
+이름을 바꾸지는 않는다. 저장소의 dbt ref에서는 legacy Event 직접 의존을 찾지
+못했지만, 외부 대시보드/직접 SQL 사용처까지 점검한 것은 아니다.
+
+스케줄과 처리 기간은 기존과 같다.
+
+| DAG | 실행 시각(KST) | 처리 범위 |
+| --- | --- | --- |
+| daily | 매일 09:00 | 전날까지 최근 3일, 수동 날짜 지정도 기존 방식 |
+| monthly | 매월 1일 12:00 | 예정일 30일 전부터 실제 실행일의 어제, daily 성공 대기 유지 |
+
+전환은 Stage(dev)에서만 허용한다. DAG 파싱과 첫 검증 task에서 출력 프로젝트,
+GA4/앱 DB 원천, 최초 적재 완료 설정을 확인한다. 스케줄러/작업 컨테이너 설정이
+달라 V2 옵션이 꺼지거나 원천이 운영으로 변경되면 검증 task가 실패하고 downstream을
+실행하지 않는다. 모든 Airflow 서비스에는 같은 환경 설정을 배포해야 한다.
+
+1. Stage daily/monthly를 일시정지하고 두 플래그를 false로 유지한다.
+2. 두 모델의 기존 테이블·스키마·전체 이력·원천 도착/가입 스냅샷 최신성을 확인한다.
+   이미 충분한 이력이 있으면 전체 재적재하지 않는다. 부족하면 원천의 실제 분석
+   시작일부터 종료일까지 명시하고, 비용을 확인한 뒤 별도 dbt 최초 적재를 수행한다.
+   기존 daily 수동 실행으로 전체 적재하면 legacy까지 실행되므로 사용하지 않는다.
+3. 아래 설정을 Stage 환경에 적용한다. 데이터셋 이름은 실제 준비 상태를 확인한다.
+   운영 기본 원천으로의 묵시적 fallback은 허용하지 않는다.
+
+```dotenv
+DBT_TARGET=dev
+KOIN_DATA_GCP_PROJECT=koin-stage-438512
+KOIN_DATA_BIGQUERY_LOCATION=asia-northeast3
+KOIN_DATA_GA4_PROJECT=koin-stage-438512
+KOIN_DATA_GA4_DATASET=analytics_427218788
+KOIN_DATA_APP_DB_PROJECT=koin-stage-438512
+KOIN_DATA_APP_DB_DATASET=analytics_427218788
+# 아래 두 값은 최초 적재/입력 검증 후에만 true로 설정
+KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE=true
+KOIN_DATA_SILVER_V2_ONLY=true
+```
+
+4. Stage Airflow 컨테이너를 재생성하고 DAG 재파싱 결과를 확인한다. 두 DAG의
+   dbt 모델 task가 V2/User 두 개뿐인지 확인하고, 먼저 작은 날짜 범위의 daily를
+   수동 실행한다. monthly에는 수동 날짜를 넣지 않는다.
+5. 날짜 범위·행 수·원천 최신성·재실행 결과와 각 모델 테스트가 통과한 후 스케줄을
+   활성화한다. 기존 스케줄의 주기나 최근 3일 범위를 변경하지 않는다.
+
+선택 재현(모델/테스트 목록 조회이며 적재 없음):
+
+```bash
+dbt ls --project-dir dbt --profiles-dir dbt --target dev --resource-type model \
+  --select tag:airflow_daily,silver_events_v2 tag:airflow_daily,silver__users
+dbt ls --project-dir dbt --profiles-dir dbt --target dev --resource-type test \
+  --select tag:airflow_monthly,silver_events_v2 tag:airflow_monthly,silver__users
+```
+
+V2 전환과 새 로깅 분류 활성화는 서로 다른 설정이다. 이번 전환 옵션은 새 로깅
+적용 기간/플랫폼을 인증하거나 `silver_logging_v1_enabled`를 켜지 않는다.
+가입·메인·수집 완전성 등의 Gold 공개 플래그도 변경하지 않는다. Silver 모델별
+테스트는 AFTER_EACH 정책이며, 두 Silver 쓰기 전체를 하나의 트랜잭션으로 묶지는
+않는다. 향후 Gold는 두 Silver의 갱신·검사가 모두 성공한 뒤 고정 Snapshot으로
+계산해야 한다. 이번 변경은 Gold DAG 실행이나 공개 연결을 추가하지 않는다.
+
+운영에서는 V2_ONLY=false를 유지한다. Stage 실패 시 DAG를 멈추고 원인을 확인한다.
+V2_ONLY=false로 복귀하면 legacy 선택 정책으로 돌아가지만, 기존 정책에서 bootstrap이
+true이면 daily는 세 모델을 선택한다는 점에 주의한다. 완전히 예전 스케줄로 복귀할
+경우 두 플래그를 false로 되돌린 뒤 컨테이너 재생성·재파싱으로 선택을 확인한다.
 
 날짜 범위 지정 예시:
 
