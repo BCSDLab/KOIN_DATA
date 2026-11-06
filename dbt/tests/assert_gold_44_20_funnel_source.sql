@@ -1,4 +1,4 @@
-{{ config(tags=['gold_44_20']) }}
+{{ config(enabled=(var('gold_validation_enabled', false) is sameas true), tags=['gold_44_20']) }}
 -- Verify facts against the frozen Silver evidence, not just array bounds.
 with {{ gold_common_ctes() }},
 definitions as (

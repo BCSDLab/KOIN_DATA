@@ -1,4 +1,4 @@
-{{ config(tags=['gold_44_20']) }}
+{{ config(enabled=(var('gold_validation_enabled', false) is sameas true), tags=['gold_44_20']) }}
 with {{ gold_common_ctes() }},
 event_ids as (select event_id,count(*) n from silver_events group by 1),
 user_ids as (select user_pseudo_id,count(*) n from user_snapshot group by 1)

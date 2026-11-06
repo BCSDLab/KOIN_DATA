@@ -5884,3 +5884,33 @@ python scripts/gold_stage.py quality-sql --contract <실행계약.json> --target
 모든 job은 Stage project, asia-northeast3다. 마지막 세 실행은 실제 Silver/Gold 참조 및 물리 공개 구간을 제거한 재현 SQL이며 실제 Gold 교체·트랜잭션 장애 복구를 검증한 것이 아니다. `scripts/gold_stage_regression.py`로 같은 합성 계약/컴파일 산출물에서 valid/missing_retention/funnel_without_source 시나리오 SQL을 재생성할 수 있다. 기존 dbt-core 1.12의 accepted_values 인자 deprecation 경고 1건은 유지한다.
 
 현재 상태: 세 코드 문제 보완·합성 회귀 검증 완료. Stage 실데이터·비용·실제 공동 공개/실패 복구·Superset 검증은 여전히 대기다. PR #31은 Draft로 유지하며 운영 Airflow 변경·병합·운영 배포를 수행하지 않는다.
+
+
+### 6.21 Silver 실행과 Gold 검증 테스트 격리 (2026-11-06)
+
+36e5f78에서 Silver V2/User 단독 및 초기 적재 완료 후 일별·월별 선택에 Gold 테스트 4개가 간접 선택되는 것을 실제 dbt ls로 확인했다. Gold 태그만으로는 기본 eager 간접 선택을 막지 못한다.
+
+- `dbt_project.yml`에 `gold_validation_enabled: false`를 선언했다.
+- Silver를 직접 참조하는 `assert_gold_44_20_input`, `assert_gold_44_20_naming`, `assert_gold_44_20_new_mapping_examples`, `assert_gold_44_20_funnel_source`는 해당 변수가 boolean true인 경우에만 enabled가 된다. 문자열 "true"나 숫자 1은 허용하지 않는다.
+- `scripts/gold_stage.py`의 일반·오프라인 Gold 전용 컴파일 경로는 동일한 vars에서 이 값을 true로 전달한다. Silver 모델·태그·Airflow 설정은 수정하지 않는다.
+- 컴파일 및 공개 SQL 생성 단계에서 필수 의미 테스트 9개의 활성 Manifest 존재를 검사한다. 과거 SQL 파일과 해시가 남아 있어도 테스트가 누락/비활성화된 Manifest로 공개를 진행하지 못한다.
+- 일반 실행에서는 기본 Snapshot 2000-01-01을 사용하는 네 테스트가 선택되지 않는다. 이 기본 날짜를 실제 관측/운영 날짜로 바꾸거나 입력 준비 완료로 간주한 것이 아니다.
+
+회귀 검증:
+
+| 실행/검사 | 결과 |
+| --- | --- |
+| Silver V2 단독 / User 단독 / 두 모델 선택 | Gold 테스트 각 0개 |
+| tag:airflow_daily / tag:airflow_monthly | Gold 테스트 각 0개 |
+| 위 일별·월별에서 initial_load_required 제외 | Gold 테스트 각 0개 |
+| Gold 태그만 선택, 변수 미지정 | Silver 읽기 Gold 테스트 4개 제외 |
+| 변수 false / 문자열 "true" / 숫자 1 | 위 네 테스트 제외 |
+| Gold 변수 boolean true + Gold 태그 | 필수 의미 검사 9개 및 일반 컬럼 검사 50개 모두 포함 |
+| 공개 게이트·해시·후보 바인딩 Python 회귀 | 기존 8개 + 누락/비활성 Manifest 2개 = 10개 통과 |
+| 실제 dbt ls 회귀 | 5개 테스트 메서드, 12개 선택 조합 통과 |
+| Gold parse/오프라인 컴파일 | 통과. 이전 산출물과 모델·검증·품질 SQL 62개를 strip 비교해 차이 0개 |
+| 공개 SQL 생성 | 활성 Manifest로 성공. 실제 실행 없음 |
+
+추가 재현 검사는 `scripts/tests/test_gold_dbt_selection.py`다. dbt-bigquery가 설치된 환경에서 `python -m unittest discover -s scripts/tests -p test_gold_dbt_selection.py -v`로 실행한다. dbt 미설치 시 skip되므로 그 상태를 격리 검증 통과로 취급하지 않는다. 이번 검증은 dbt-core 1.12.6 / bigquery adapter 1.9.2 환경에서 실제로 실행했다. 컴파일의 기존 accepted_values deprecation 경고와 반복 dbtRunner 호출의 라이브러리 ResourceWarning/DeprecationWarning은 테스트 실패가 아니다.
+
+이번 변경은 테스트 활성화/선택과 누락 방지에 한정된다. 계산 SQL 62개가 이전과 동일해 BigQuery 합성 실행을 반복하지 않았다. BigQuery 실제 적재·SDK 배포·Stage 실데이터/비용/공개 복구·운영 Airflow·병합은 수행하지 않았으며 PR #31은 Draft를 유지한다. 사용자는 Silver도 직접 담당한다고 범위를 확장했으나 이번 PR 수정에서 Silver 매핑을 변경하지는 않았다. 다음 단계는 Silver 신·구 로깅 매핑과 입력 계약 정리다.

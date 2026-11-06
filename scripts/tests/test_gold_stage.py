@@ -35,6 +35,8 @@ class PublicationTests(unittest.TestCase):
         manifest = {'nodes': {'test': dict(name='not_null_test', resource_type='test',
                      test_metadata={'name':'not_null'}, depends_on={'nodes':[
                      'model.koin_data.mart_kpi_user_daily']})}}
+        for name in gold_stage.VALIDATION_NAMES:
+            manifest['nodes'][name] = dict(name=name,resource_type='test',config={'enabled':True})
         (self.target/'manifest.json').write_text(json.dumps(manifest))
         hashes = {}
         for name in list(gold_stage.ARTIFACTS)+[generic]:
@@ -95,6 +97,22 @@ class PublicationTests(unittest.TestCase):
     def test_changed_contract_blocks(self):
         self.p['build_id'] = 'different'
         with self.assertRaisesRegex(ValueError,'Compile contract differs'):
+            gold_stage.publication_sql(self.p,self.target)
+
+    def test_disabled_required_test_blocks_even_with_old_compiled_sql(self):
+        path = self.target/'manifest.json'
+        manifest = json.loads(path.read_text())
+        manifest['nodes']['assert_gold_44_20_input']['config']['enabled'] = False
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError,'Required Gold tests disabled'):
+            gold_stage.publication_sql(self.p,self.target)
+
+    def test_missing_required_test_blocks_even_with_old_compiled_sql(self):
+        path = self.target/'manifest.json'
+        manifest = json.loads(path.read_text())
+        del manifest['nodes']['assert_gold_44_20_naming']
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError,'Required Gold tests disabled'):
             gold_stage.publication_sql(self.p,self.target)
 
 

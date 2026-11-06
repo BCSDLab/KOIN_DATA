@@ -1,4 +1,4 @@
-{{ config(tags=['gold_44_20']) }}
+{{ config(enabled=(var('gold_validation_enabled', false) is sameas true), tags=['gold_44_20']) }}
 with {{ gold_common_ctes() }}, examples as ({{ gold_new_logging_examples() }})
 select e.event_id,e.event_label,e.service_name,e.funnel_stage,e.service_step_order
 from silver_events e join examples x using(event_label)

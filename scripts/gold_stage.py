@@ -75,6 +75,15 @@ def generic_test_names(manifest):
                   and set(n['depends_on']['nodes']) & parents)
 
 
+def require_validation_inventory(manifest):
+    enabled = {n['name'] for n in manifest['nodes'].values()
+               if n['resource_type']=='test' and n.get('config', {}).get('enabled', True) is True}
+    missing = set(VALIDATION_NAMES)-enabled
+    if missing:
+        raise ValueError('Required Gold tests disabled or missing; recompile with '
+                         'gold_validation_enabled=true: '+', '.join(sorted(missing)))
+
+
 def validate_contract(p, publish=False):
     for key in ('snapshot_at', 'computed_at'):
         dt.datetime.fromisoformat(p[key].replace('Z', '+00:00'))
@@ -119,7 +128,8 @@ def compile_models(p, dbt, target, offline=False):
                KOIN_DATA_GA4_PROJECT=STAGE, KOIN_DATA_GA4_DATASET='analytics_427218788',
                KOIN_DATA_APP_DB_PROJECT=STAGE, KOIN_DATA_APP_DB_DATASET='analytics_427218788',
                DBT_SEND_ANONYMOUS_USAGE_STATS='false', DBT_LOG_PATH=str(target / 'logs'))
-    variables = json.dumps({'gold_build': p, 'event_complete_start_dt': p['event_complete_start_dt'],
+    variables = json.dumps({'gold_validation_enabled': True, 'gold_build': p,
+                            'event_complete_start_dt': p['event_complete_start_dt'],
                             'event_complete_dt': p['event_complete_dt']})
     base = [dbt, '--no-use-colors', '--no-populate-cache']
     options = ['--project-dir', str(ROOT / 'dbt'), '--profiles-dir', str(ROOT / 'dbt'),
@@ -152,6 +162,7 @@ def compile_models(p, dbt, target, offline=False):
         subprocess.run(base + ['compile', '--no-introspect', '--select', 'tag:gold_44_20'] + options,
                        check=True, env=env)
     manifest = json.loads((target / 'manifest.json').read_text())
+    require_validation_inventory(manifest)
     for name in TABLES:
         node = manifest['nodes']['model.koin_data.' + name]
         expected = {'model.koin_data.silver_events_v2', 'model.koin_data.silver__users'}
@@ -185,7 +196,9 @@ def publication_sql(p, target):
     lock = json.loads((target / 'gold_build_contract.json').read_text())
     if lock['contract'] != p:
         raise ValueError('Compile contract differs from publication contract; recompile')
-    generic_names = generic_test_names(json.loads((target / 'manifest.json').read_text()))
+    manifest = json.loads((target / 'manifest.json').read_text())
+    require_validation_inventory(manifest)
+    generic_names = generic_test_names(manifest)
     if not generic_names or lock.get('generic_checks')!=generic_names:
         raise ValueError('Generic validation inventory changed; recompile')
     for n in list(ARTIFACTS)+generic_names:
