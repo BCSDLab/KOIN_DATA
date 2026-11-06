@@ -114,6 +114,13 @@ class SilverAirflowSelectionTests(unittest.TestCase):
                    and isinstance(n.func,ast.Name) and n.func.id=="create_cron_schedule"]
             self.assertEqual(crons,[cron])
 
+    def test_daily_partition_writes_are_serialized(self):
+        tree=ast.parse((DAGS/'dbt_ga4_daily.py').read_text())
+        dag=next(n for n in ast.walk(tree) if isinstance(n,ast.Call)
+                 and isinstance(n.func,ast.Name) and n.func.id=='DbtDag')
+        limit=next(k.value for k in dag.keywords if k.arg=='max_active_runs')
+        self.assertEqual(ast.literal_eval(limit),1)
+
 
 if __name__ == "__main__":
     unittest.main()

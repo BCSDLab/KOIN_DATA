@@ -38,6 +38,8 @@ dbt_ga4_daily = DbtDag(
     schedule=create_cron_schedule("0 9 * * *"),
     start_date=pendulum.datetime(2026, 7, 25, tz=SCHEDULE_TIMEZONE),
     catchup=False,
+    # 같은 파티션을 수동/예약 실행이 동시에 교체하지 않게 직렬화한다.
+    max_active_runs=1,
     default_args={
         "retries": 1,
         "retry_delay": timedelta(minutes=5),
