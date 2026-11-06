@@ -63,6 +63,23 @@ reasons as (
   from silver_events e where {{ gold_funnel_target('e') }}
     and coalesce(safe_cast(e.ga_session_id as int64)>0,false)=false
   union all
+  select e.event_dt,e.platform,e.user_pseudo_id,'funnel_unsupported__'||s.funnel_id
+  from silver_events e join ({{ gold_funnel_support() }}) s on s.platform=e.platform and not s.supported
+  where (s.funnel_id!='signup' and (e.service_name=s.funnel_id or
+    (e.service_name='main' and e.funnel_stage='main')))
+    or (s.funnel_id='signup' and e.service_name='account' and
+      (e.label_feature='sign_up' or e.funnel_stage in
+       ('signup_start','terms_agreement','identity_verification','form_entry','signup_complete')))
+  union all
+  select e.event_dt,e.platform,e.user_pseudo_id,'main_visit_unverified'
+  from silver_events e cross join gold_parameters p
+  where (not p.main_visit_verified or e.platform not in unnest(p.main_visit_platforms))
+    and e.service_name='main' and e.funnel_stage='main'
+  union all
+  select e.event_dt,e.platform,e.user_pseudo_id,'funnel_entry_path_unverified__cafeteria'
+  from silver_events e where e.platform='IOS' and e.event_name='DA1'
+    and e.event_label='main__main__more__click'
+  union all
   select e.event_dt,e.platform,e.user_pseudo_id,'funnel_session_key_excluded'
   from silver_events e where {{ gold_funnel_target('e') }}
     and coalesce(safe_cast(e.ga_session_id as int64)>0,false)=false

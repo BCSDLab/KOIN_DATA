@@ -21,5 +21,10 @@
   "mapping_verified_evidence": "",
   "session_verified_evidence": "",
   "naming_scopes": [],
-  "approved_legacy_labels": []
+  "approved_legacy_labels": [],
+  "main_visit_verified": false,
+  "main_visit_verified_evidence": "",
+  "funnel_support_verified": false,
+  "funnel_support_verified_evidence": "",
+  "main_visit_platforms": []
 }

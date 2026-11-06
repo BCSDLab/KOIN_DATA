@@ -19,6 +19,7 @@ def contract():
              naming_scopes=[dict(platform='WEB', event_name='DA1', start_dt='2026-10-01',
                                  end_dt='2026-11-30', evidence='Synthetic test only')],
              approved_legacy_labels=[])
+    p['main_visit_platforms'] = ['WEB','ANDROID','IOS']
     for gate in gold_stage.GATES:
         p[gate] = True
         p[gate+'_evidence'] = 'Synthetic test only'
@@ -97,6 +98,16 @@ class PublicationTests(unittest.TestCase):
     def test_changed_contract_blocks(self):
         self.p['build_id'] = 'different'
         with self.assertRaisesRegex(ValueError,'Compile contract differs'):
+            gold_stage.publication_sql(self.p,self.target)
+
+    def test_unverified_main_blocks_publication(self):
+        self.p['main_visit_verified'] = False
+        with self.assertRaisesRegex(ValueError,'main_visit_verified'):
+            gold_stage.publication_sql(self.p,self.target)
+
+    def test_unverified_support_blocks_publication(self):
+        self.p['funnel_support_verified'] = False
+        with self.assertRaisesRegex(ValueError,'funnel_support_verified'):
             gold_stage.publication_sql(self.p,self.target)
 
     def test_disabled_required_test_blocks_even_with_old_compiled_sql(self):

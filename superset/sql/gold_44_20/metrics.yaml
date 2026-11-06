@@ -40,7 +40,7 @@ aggregate_physical_dataset:
 funnel_virtual_dataset:
   time_column: event_dt
   metrics:
-    reached_users: COUNT(DISTINCT IF(is_complete AND max_step_reached>=step_no,user_pseudo_id,NULL))
+    reached_users: CASE WHEN COUNTIF(is_complete)=0 THEN NULL ELSE COUNT(DISTINCT IF(is_complete AND max_step_reached>=step_no,user_pseudo_id,NULL)) END
     # 배열에 남은 미완료 세션만 집계. 키 결측/비정상 이벤트의 규모는
     # gold_input_quality의 funnel_session_key_* event_count/distinct_users로 확인.
     excluded_sessions: COUNT(DISTINCT IF(NOT is_complete,session_key,NULL))
@@ -48,6 +48,9 @@ funnel_virtual_dataset:
   required_filters:
   - funnel_id
   - funnel_version
+  # 미지원 플랫폼·가입 미결·main 미검증은 0명/100% 이탈로 표시하지 않는다.
+  # 지원표는 dbt/analyses/gold_funnel_support_catalog.sql. 세션 플랫폼은
+  # 44컬럼 facts에 없으므로 platform_dominant를 퍼널 플랫폼 필터로 사용하지 않는다.
 service_users_virtual_dataset:
   time_column: event_dt
   metrics:
