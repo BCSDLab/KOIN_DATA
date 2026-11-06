@@ -1,0 +1,73 @@
+user_physical_dataset:
+  table: koin-stage-438512.gold.mart_kpi_user_daily
+  time_column: event_dt
+  metrics:
+    mau_users: COUNT(DISTINCT IF(is_active_any_event=1,user_pseudo_id,NULL))
+    new_users: SUM(is_new_user)
+    data_as_of_dt: MAX(event_complete_dt)
+    signup_retention_d1: CASE WHEN COUNT(is_signup_retained_d1)<30 THEN NULL ELSE SAFE_DIVIDE(SUM(is_signup_retained_d1),COUNT(is_signup_retained_d1))
+      END
+    signup_retention_d7: CASE WHEN COUNT(is_signup_retained_d7)<30 THEN NULL ELSE SAFE_DIVIDE(SUM(is_signup_retained_d7),COUNT(is_signup_retained_d7))
+      END
+    signup_retention_d14: CASE WHEN COUNT(is_signup_retained_d14)<30 THEN NULL ELSE SAFE_DIVIDE(SUM(is_signup_retained_d14),COUNT(is_signup_retained_d14))
+      END
+    signup_retention_d30: CASE WHEN COUNT(is_signup_retained_d30)<30 THEN NULL ELSE SAFE_DIVIDE(SUM(is_signup_retained_d30),COUNT(is_signup_retained_d30))
+      END
+    signup_eligible_d1: COUNT(is_signup_retained_d1)
+    signup_eligible_d7: COUNT(is_signup_retained_d7)
+    signup_eligible_d14: COUNT(is_signup_retained_d14)
+    signup_eligible_d30: COUNT(is_signup_retained_d30)
+  signup_chart_filter: event_dt=first_signup_dt
+aggregate_physical_dataset:
+  table: koin-stage-438512.gold.mart_service_metrics_daily
+  time_column: metric_dt
+  metrics:
+    denominator: SUM(denominator_users)
+    numerator: CASE WHEN COUNT(*)=0 OR COUNTIF(is_complete IS DISTINCT FROM TRUE)>0 THEN NULL ELSE SUM(numerator_users) END
+    complete_rate: CASE WHEN COUNT(*)=0 OR COUNTIF(is_complete IS DISTINCT FROM TRUE)>0 THEN NULL ELSE SAFE_DIVIDE(SUM(numerator_users),SUM(denominator_users))
+      END
+    range_eligible_users: SUM(IF(is_complete,denominator_users,0))
+    range_pending_users: SUM(IF(is_complete IS FALSE,denominator_users,0))
+    range_rate: CASE WHEN SUM(IF(is_complete,denominator_users,0))<30 THEN NULL ELSE SAFE_DIVIDE(SUM(IF(is_complete,numerator_users,0)),SUM(IF(is_complete,denominator_users,0)))
+      END
+    retention_rate: CASE WHEN COUNT(*)=0 OR COUNTIF(is_complete IS DISTINCT FROM TRUE)>0 OR SUM(denominator_users)<30 THEN NULL ELSE SAFE_DIVIDE(SUM(numerator_users),SUM(denominator_users))
+      END
+  chart_filters:
+    range: metric_type='first_seen_range_entry_d1_d7' AND service_name='__all__' AND period_n=7 AND cohort_user_segment='new'
+    daily: metric_type='retention_daily'
+    weekly: metric_type='retention_weekly'
+    churn: metric_type='churn_56d' AND period_n=56 AND cohort_user_segment='not_applicable'
+funnel_virtual_dataset:
+  time_column: event_dt
+  metrics:
+    reached_users: CASE WHEN COUNTIF(is_complete)=0 THEN NULL ELSE COUNT(DISTINCT IF(is_complete AND max_step_reached>=step_no,user_pseudo_id,NULL)) END
+    # 배열에 남은 미완료 세션만 집계. 키 결측/비정상 이벤트의 규모는
+    # gold_input_quality의 funnel_session_key_* event_count/distinct_users로 확인.
+    excluded_sessions: COUNT(DISTINCT IF(NOT is_complete,session_key,NULL))
+  required_group: step_no
+  required_filters:
+  - funnel_id
+  - funnel_version
+  # 미지원 플랫폼·가입 미결·main 미검증은 0명/100% 이탈로 표시하지 않는다.
+  # 지원표는 dbt/analyses/gold_funnel_support_catalog.sql. 세션 플랫폼은
+  # 44컬럼 facts에 없으므로 platform_dominant를 퍼널 플랫폼 필터로 사용하지 않는다.
+service_users_virtual_dataset:
+  time_column: event_dt
+  metrics:
+    service_users: COUNT(DISTINCT user_pseudo_id)
+  period_chart_group:
+  - service_name
+  - period_user_segment
+  daily_chart_group:
+  - service_name
+  - daily_user_segment
+service_dau_wow_virtual_dataset:
+  time_column: event_dt
+  required_group:
+  - event_dt
+  - service_name
+  metrics:
+    dau_users: SUM(dau_users)
+    previous_dau_users: SUM(previous_dau_users)
+    wow_rate: CASE WHEN COUNTIF(is_complete_pair IS DISTINCT FROM TRUE)>0 THEN NULL ELSE SAFE_DIVIDE(SUM(dau_users)-SUM(previous_dau_users),SUM(previous_dau_users))
+      END

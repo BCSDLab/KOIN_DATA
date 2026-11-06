@@ -9,6 +9,9 @@ macro-paths: ["macros"]
 test-paths: ["tests"]
 seed-paths: ["seeds"]
 
+vars:
+  gold_validation_enabled: false
+
 clean-targets:
   - "target"
   - "dbt_packages"

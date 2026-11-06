@@ -1,0 +1,244 @@
+version: 2
+models:
+- name: mart_kpi_user_daily
+  description: Gold 2026-11-06 새 로깅 v1 입력 계약. 44/20컬럼, Silver 직접 참조. 로깅 개발·분류 검증 전
+    실데이터 공개 금지.
+  columns:
+  - name: event_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: user_pseudo_id
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: user_id
+    data_type: STRING
+  - name: gender
+    data_type: STRING
+  - name: major
+    data_type: STRING
+  - name: entry_year
+    data_type: INT64
+  - name: user_type
+    data_type: STRING
+  - name: is_deleted
+    data_type: BOOL
+  - name: is_mysql_mapped
+    data_type: BOOL
+    data_tests:
+    - not_null
+  - name: platform_dominant
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: device_category_dominant
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: device_os_dominant
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: event_cnt_day
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: entry_event_cnt_day
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: core_action_cnt_day
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: session_cnt_day
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: engagement_msec_day
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: is_multi_session_user
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: first_seen_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: first_signup_dt
+    data_type: DATE
+  - name: is_new_user
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: is_new_signup
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: had_entry_prev_day
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: is_signup_retained_d1
+    data_type: INT64
+  - name: is_signup_retained_d7
+    data_type: INT64
+  - name: is_signup_retained_d14
+    data_type: INT64
+  - name: is_signup_retained_d30
+    data_type: INT64
+  - name: used_shop_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: used_cafeteria_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: used_bus_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: used_board_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: used_facility_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: used_timetable_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: used_account_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: is_active_entry
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: is_active_any_event
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: has_core_action
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: used_main_flg
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: event_complete_start_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: event_complete_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: user_snapshot_at
+    data_type: TIMESTAMP
+    data_tests:
+    - not_null
+  - name: build_id
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: computed_at
+    data_type: TIMESTAMP
+    data_tests:
+    - not_null
+  - name: funnel_session_facts
+    data_type: ARRAY<STRUCT<funnel_id STRING, funnel_version STRING, session_key STRING,
+      anchor_dt DATE, is_complete BOOL, max_step_reached INT64, total_steps INT64,
+      step_reached_at ARRAY<TIMESTAMP>>>
+    data_tests:
+    - not_null
+- name: mart_service_metrics_daily
+  description: Gold 2026-11-06 새 로깅 v1 입력 계약. 44/20컬럼, Silver 직접 참조. 로깅 개발·분류 검증 전
+    실데이터 공개 금지.
+  columns:
+  - name: metric_row_id
+    data_type: STRING
+    data_tests:
+    - not_null
+    - unique
+  - name: metric_type
+    data_type: STRING
+    data_tests:
+    - not_null
+    - accepted_values:
+        values:
+        - retention_daily
+        - retention_weekly
+        - churn_56d
+        - first_seen_range_entry_d1_d7
+        - app_weekly_nonreturn
+  - name: metric_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: service_name
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: period_n
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: window_start_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: window_end_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: gender
+    data_type: STRING
+  - name: major
+    data_type: STRING
+  - name: entry_year
+    data_type: INT64
+  - name: user_type
+    data_type: STRING
+  - name: cohort_user_segment
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: denominator_users
+    data_type: INT64
+    data_tests:
+    - not_null
+  - name: numerator_users
+    data_type: INT64
+  - name: is_complete
+    data_type: BOOL
+    data_tests:
+    - not_null
+  - name: event_complete_start_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: event_complete_dt
+    data_type: DATE
+    data_tests:
+    - not_null
+  - name: user_snapshot_at
+    data_type: TIMESTAMP
+    data_tests:
+    - not_null
+  - name: build_id
+    data_type: STRING
+    data_tests:
+    - not_null
+  - name: computed_at
+    data_type: TIMESTAMP
+    data_tests:
+    - not_null
