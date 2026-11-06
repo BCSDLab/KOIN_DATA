@@ -6234,3 +6234,23 @@ Stage 전용 옵션은 false, 신규 로깅 매핑·Gold 인증/공개는 계속
 풀은 직접 SQL 작업이나 전체 DAG의 원자성을 보장하지 않는다.
 라이브 체크아웃 대신 별도 release와 Airflow 전용 Compose overlay를 사용한다.
 이 절의 배포 결과는 실제 적재·실행 확인 후 아래에 기록한다.
+
+
+운영 배포·검증 결과:
+- 실행 코드: 39958d3, 별도 release `/home/ubuntu/koin-releases/silver-prod-39958d3`.
+- Event 21,752,971행, 2024-07-11~2026-11-05 연속 848일. User 58,144행,
+  최초 관측 2024-05-03, 사용자 키 중복·필수값 누락·Event 결합 누락 0건.
+- 운영 서비스 계정 dbt 품질 검사 15개 통과. 로컬 회귀 50개 + 운영 dbt 선택 검사 1개 통과.
+- 실제 일별 수동 검증과 월별 예약 실행 모두 성공. 두 DAG의 dbt task 10개가 공통 풀에서
+  겹침 없이 실행됐다. 월별은 활성화 후 11월 1일 예약분이 생성되어 10월 2일~11월 5일을
+  보정했고, 실행 당일 11월 6일 09시 daily 성공을 확인했다.
+- 일별 다음 실행 11월 7일 09시 KST, 월별 다음 실행 12월 1일 12시 KST.
+- API·Scheduler·Dag Processor·Triggerer 정상, DAG 로딩 오류 0건.
+- 라이브 main 체크아웃과 dashboard_assets/는 보존. 원본 .env/Compose/컨테이너 설정/
+  DAG 상태/메타데이터를 비공개 백업했으며, 기본 Compose도 release overlay를 계속 사용한다.
+- 후보·검증 근거 job: `koin_prod_bootstrap_silver_events_v2_20261106_v1`,
+  `koin_prod_bootstrap_silver__users_20261106_v1`, `koin_prod_bootstrap_validation_20261106_v2`,
+  `koin_prod_silver_initial_publish_20261106_v1`, `koin_prod_silver_postwrite_validation_20261106_v1`.
+- 기존 silver_events는 일별 갱신을 유지한다. V2 단독 전환·사용처 변경은 하지 않았다.
+- PR #34는 #33 기반 Draft로 유지한다. 신규 로깅 매핑과 Gold 공개·실데이터 지표 인증은
+  이번 Silver 배포와 별개이며 아직 활성화하지 않았다.
