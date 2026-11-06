@@ -25,6 +25,11 @@ session_quality as (
   from session_events group by 1,2
 ),
 funnel_support as ({{ gold_funnel_support() }}),
+ambiguous_funnel_sessions as (
+  select distinct user_pseudo_id,ga_session_id,'cafeteria' as funnel_id
+  from silver_events where platform='IOS' and event_name='DA1'
+    and event_label='main__main__more__click'
+),
 funnel_definitions as (
   select 'signup' as funnel_id,'account' as service_name,5 as total_steps
   {% for s in ['shop','bus','cafeteria','timetable','board'] %}
@@ -66,6 +71,8 @@ session_facts as (
       date(p.t1,'Asia/Seoul') as anchor_dt,
       (b.coverage_verified and b.mapping_verified and b.session_verified
         and b.funnel_support_verified and coalesce(s.supported,false)
+        and not exists(select 1 from ambiguous_funnel_sessions a where a.user_pseudo_id=p.user_pseudo_id
+          and a.ga_session_id=p.ga_session_id and a.funnel_id=p.funnel_id)
         and (p.funnel_id='signup' or (b.main_visit_verified and q.session_platform in unnest(b.main_visit_platforms)))
         and b.inactivity_minutes>0 and b.late_arrival_hours>=0 and q.platform_count=1
         and date(q.first_time,'Asia/Seoul')>=b.complete_start_dt
