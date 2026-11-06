@@ -6217,3 +6217,20 @@ Production 준비 시에는 현재 Stage전용 V2옵션을 그대로 운영에�
 운영 두 테이블 존재/초기 범위/비용을 다시 확인하고 최초 적재와 품질 검사를 먼저
 수행해야 한다. 운영용 모델선택·공통쓰기pool과 기존silver_events 사용처 전환을
 별도로 검토한 뒤 운영스케줄을 변경한다. 이 작업에서 운영쓰기/병합은 하지 않았다.
+
+
+### 6.27 Production Silver 병행 배포 정책 (2026-11-06)
+
+사용자가 Stage 검증 후 운영 배포 준비·최초 적재·검증·스케줄 활성화를 요청했다.
+출력과 GA4/app_db 입력은 kap-chat / analytics_432041405에 고정한다.
+Event 최초 범위는 2024-07-11~2026-11-05, User는 원천 전체 2024-05-03~2026-11-05다.
+운영 원본 Event와 사용처를 유지하고 KOIN_DATA_SILVER_PROD_MODE=parallel로 시작한다.
+일별은 silver_events + silver_events_v2 + silver__users, 월별은 V2/User 두 모델이다.
+기존 일별 09시·최근 3일, 월별 1일 정오·30일 보정과 당일 09시 성공 의존을 유지한다.
+Stage 전용 옵션은 false, 신규 로깅 매핑·Gold 인증/공개는 계속 비활성이다.
+원천 계약·두 모델 최초 적재 검증 JSON·BOOTSTRAP_COMPLETE를 모두 요구한다.
+기존 사용처 전환 증거 없이는 운영 v2_only를 차단한다.
+운영 공통 pool koin_prod_silver_writes 1 slot으로 일별·월별·수동 dbt task를 직렬화한다.
+풀은 직접 SQL 작업이나 전체 DAG의 원자성을 보장하지 않는다.
+라이브 체크아웃 대신 별도 release와 Airflow 전용 Compose overlay를 사용한다.
+이 절의 배포 결과는 실제 적재·실행 확인 후 아래에 기록한다.

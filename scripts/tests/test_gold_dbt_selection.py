@@ -115,5 +115,26 @@ class DbtSelectionTests(unittest.TestCase):
                     self.assertTrue(model_deps <= {'model.koin_data.silver_events_v2','model.koin_data.silver__users'})
 
 
+    def test_production_parallel_selects_exact_models_without_gold(self):
+        env=dict(DBT_TARGET='prod',KOIN_DATA_GCP_PROJECT='kap-chat',
+                 KOIN_DATA_GA4_PROJECT='kap-chat',KOIN_DATA_GA4_DATASET='analytics_432041405',
+                 KOIN_DATA_APP_DB_PROJECT='kap-chat',KOIN_DATA_APP_DB_DATASET='analytics_432041405',
+                 KOIN_DATA_SILVER_PROD_MODE='parallel',KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE='true')
+        keys=_selection_module.SOURCE_KEYS
+        env['KOIN_DATA_SILVER_SOURCE_CONTRACT']=json.dumps(dict(
+            {k:env[k] for k in keys},evidence='test only'))
+        env['KOIN_DATA_SILVER_PROD_BOOTSTRAP_EVIDENCE']=json.dumps(dict(
+            project='kap-chat',models=['silver_events_v2','silver__users'],
+            tests_passed=True,evidence='test only'))
+        for tag in ['airflow_daily','airflow_monthly']:
+            config=silver_selection(tag,env)
+            expected={'silver_events_v2','silver__users'}
+            if tag=='airflow_daily':
+                expected.add('silver_events')
+            with self.subTest(tag=tag):
+                self.assertEqual(self.selected(config['select'],resource_type='model'),expected)
+                self.assert_no_gold(self.selected(config['select']))
+
+
 if __name__ == '__main__':
     unittest.main()

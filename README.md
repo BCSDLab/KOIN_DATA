@@ -194,3 +194,25 @@ docker compose run --rm dbt run
 - Do not expose Postgres `5432` directly to the internet.
 - Give club members viewer-level Superset permissions only.
 - Use Public Dashboard only for data that can be visible to anyone.
+
+### Production Silver V2/User rollout
+
+Production uses `KOIN_DATA_SILVER_PROD_MODE=parallel` after both new models have
+been initialized and validated against `kap-chat.analytics_432041405`.
+`KOIN_DATA_SILVER_V2_ONLY` remains false. Explicit source-contract JSON and
+`KOIN_DATA_SILVER_PROD_BOOTSTRAP_EVIDENCE` are required; see `.env.example`.
+Daily keeps legacy `silver_events` alongside V2/User; monthly selects V2/User.
+Crons and date windows remain unchanged. All dbt tasks use the one-slot
+`koin_prod_silver_writes` pool, including manual runs. Pause both DAGs and wait
+for in-flight tasks before any direct SQL repair; the pool does not lock CLI jobs.
+
+Deploy an isolated release with `docker-compose.silver-production.yml`, setting
+absolute `KOIN_DATA_SILVER_RELEASE_DIR` and `KOIN_DATA_SILVER_RELEASE_ENV` paths.
+Retain the live base Compose file, `.env`, credentials, auth file and metadata.
+Create the pool, validate Compose and DAG imports, then enable schedules after a
+real daily run succeeds. The overlay also runs the Airflow 3 DAG processor and
+triggerer. Record the prior DAG states and container configuration before rollout.
+Rollback: pause the two DAGs, wait for writes to finish, recreate only the Airflow
+services using the saved base configuration, stop overlay-only processor/triggerer
+services, then restore prior DAG pause states. Preserve the new tables and evidence.
+Do not change legacy consumers or enable new logging/Gold flags during this rollout.
