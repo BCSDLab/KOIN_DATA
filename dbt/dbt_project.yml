@@ -11,6 +11,10 @@ seed-paths: ["seeds"]
 
 vars:
   gold_validation_enabled: false
+  silver_logging_v1_enabled: false
+  silver_logging_validation_enabled: false
+  silver_logging_v1_scopes: []
+  silver_logging_v1_legacy_labels: []
 
 clean-targets:
   - "target"
