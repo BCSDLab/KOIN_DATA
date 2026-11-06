@@ -41,6 +41,8 @@ funnel_virtual_dataset:
   time_column: event_dt
   metrics:
     reached_users: COUNT(DISTINCT IF(is_complete AND max_step_reached>=step_no,user_pseudo_id,NULL))
+    # 배열에 남은 미완료 세션만 집계. 키 결측/비정상 이벤트의 규모는
+    # gold_input_quality의 funnel_session_key_* event_count/distinct_users로 확인.
     excluded_sessions: COUNT(DISTINCT IF(NOT is_complete,session_key,NULL))
   required_group: step_no
   required_filters:

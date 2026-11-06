@@ -5836,3 +5836,51 @@ Superset 가상 Dataset의 날짜 처리는 [공식 SQL Templating 문서](https
 컴파일에는 별도 임시 합성 계약을 사용했다. 예시 JSON의 날짜 NULL·검증 FALSE·세션 0을 실제 운영값으로 채운 것이 아니다. 저장소의 dbt 1.9 계열 호환을 위해 유지한 accepted_values 인자 형식은 dbt-core 1.12에서 deprecation 경고 1건을 출력한다.
 
 현재 상태는 **Stage 테이블 구조 생성 완료, 실데이터 적재·퍼널·리텐션 검증 대기**다. Draft PR은 실데이터 검증 전까지 유지한다. 입력 계약 확정 → Stage 적재·원천 수치/집합·비용·공동 공개/실패 복구 검증 → PR에 결과 추가 및 리뷰·병합 → Superset 검증 → 별도 승인으로 운영 반영 순서를 따른다. 이 PR만으로 BigQuery 적재·운영 배포·Superset 등록을 실행하지 않는다.
+
+
+### 6.20 PR #31 보완 — 검사 범위·후보 검증·세션 품질 (2026-11-06)
+
+이 절은 6.19의 네이밍 검사·공개 전 검증 설명을 보완한다. 44/20컬럼과 두 Gold 모델의 Silver 직접 참조는 유지한다. 실제 새 로깅은 아직 배포·수집 확인 전이므로 SDK/Silver 실데이터 검증 완료로 표시하지 않는다.
+
+**Notion 대조 및 네이밍 검사 범위**
+
+[통합 규칙 v1.0](https://app.notion.com/p/4000221954bc81469ea6dbe19c7d8be7), [로깅 통합 가이드](https://app.notion.com/p/3c30221954bc8214b1c481c5bbb6fba5), [네이밍 사전](https://app.notion.com/p/38b0221954bc831b912c012d8af2c857)을 재조회했다. 품절 제보 원문·라벨·category·value와 Notion 명세는 수정하지 않았다.
+
+- 실행 계약에 `naming_scopes`(platform, event_name, start_dt, end_dt, evidence)를 추가했다. 실제 배포 근거가 있는 플랫폼·DA1/DA2·기간만 일반 네이밍 검사를 적용한다. 빈 범위로는 공개 SQL을 생성하지 못한다.
+- Silver에 검증된 앱/SDK 버전 필드가 없으므로 버전별 검증 완료를 주장하지 않는다. 동일 플랫폼·기간에 구버전이 섞이면 `approved_legacy_labels`의 platform/event_name/event_label/event_category 정확 일치와 source_url/evidence로만 승인한다. wildcard·prefix 예외는 허용하지 않으며 예시 목록은 비워 둔다.
+- Notion v1.0 3-2절에 명시된 DA1 `cafeteria__cafeteria__soldout_submit` + category submit/fail만 고정 결과형 예외로 보존한다. 다른 category나 유사 라벨은 자동 예외가 아니다.
+- 버스의 `bus__header__timetable__click` 같은 기존 목적지형 4구간은 일반 문법도 통과하므로 강제 변환하지 않는다. 새 목적지나 feature의 의미까지 승인하는 검사는 아니며, 전체 매핑 검증은 별도다.
+- 범위 안의 미등록 구형/잘못된 라벨은 실패한다. 범위 밖은 `naming_outside_scope`로 보고하며 새 네이밍 검증 통과로 세지 않는다. 이를 이유로 Gold 활동 이벤트를 임의 제거하거나 Silver 분류를 복구하지 않는다. 공식 지표 공개에는 기존 수집 완전성·매핑 검증 게이트도 계속 필요하다.
+
+**공개 직전 후보 검증**
+
+`gold_stage.py publish-sql`이 컴파일된 의미 검증 9개와 두 모델 YAML의 일반 컬럼 테스트 50개를 읽고, Gold 참조를 같은 실행의 임시 후보로 바인딩해 `ASSERT NOT EXISTS`로 실행한다. 입력·네이밍·명세 대조·사용자 불변식·리텐션 구간·퍼널 원천 증거·배치·음수/중복 검사를 포함한다. 현재 공개 테이블의 INFORMATION_SCHEMA를 보는 2개 컬럼 목록 테스트는 후보 검사 대신 사용하지 않는다. 44/20 목록 일치는 컴파일 계약 대조로 확인하며 공개 INSERT는 계약의 컬럼을 명시한다.
+
+퍼널 원천 검사는 단계별 시각/사용자/세션/퍼널의 실제 Silver 증거, 등록된 총 단계 수와 버전, 첫 단계 대상 보존 및 중복 facts를 확인한다. 리텐션은 57개 일별/9개 주별 구간과 period_n·분모 불변을 검사한다. 모델 SQL뿐 아니라 검증 SQL·품질 조회 SQL·일반 컬럼 테스트도 해시 고정하며, 계약/검증 목록/해시가 달라지면 재컴파일해야 한다. 모든 검사가 성공한 후에만 기존 공동 교체 트랜잭션을 시작한다.
+
+**세션 키 품질 조회**
+
+`dbt/analyses/gold_input_quality.sql`은 별도 조회 SQL이다. 세 번째 물리 Gold 테이블이나 45번째 사용자 컬럼을 만들지 않는다. 동일 Snapshot의 Gold 대상 입력에서 퍼널 대상 이벤트의 ga_session_id 결측/비정상 사유별 event_count·distinct_users를 반환한다. `funnel_session_key_excluded`는 두 사유를 합친 고유 사용자도 중복 제거한다. day_platform 및 whole_input 집계를 제공하며 일별 distinct_users를 합산해 기간 고유 사용자로 쓰지 않는다. 사유별 행도 서로 중첩되므로 전체 행 수를 합산하지 않는다.
+
+`excluded_sessions`는 기존 배열에 남은 미완료 세션 수다. 키가 없어 제외된 규모를 대표하지 않으며, 새 품질 결과도 정확한 제외 세션 수라고 부르지 않는다. 공개 SQL에는 임시 품질 결과 SELECT가 포함되며 스크립트의 해당 SELECT 결과/child job을 저장할 수 있다. 공개 전 실패 시에도 독립 조회가 가능하다:
+
+```bash
+python scripts/gold_stage.py quality-sql --contract <실행계약.json> --target <컴파일디렉터리>
+```
+
+이 명령은 SQL 출력만 수행한다. 실운영 계약의 NULL·FALSE를 임의로 채워 실행하지 않는다.
+
+**회귀 검증 결과**
+
+- dbt parse/엔진 오프라인 컴파일 및 44/20컬럼·직접 Silver 의존성 확인 통과.
+- Python 공개 게이트·예외 범위·검증 바인딩·계약/해시 변경 차단 8개 통과.
+- 기존 합성 계산 22개 실패 0행: job `job_qkomzdTE-ClPbFRaxtf334tOtRJ7` (cache hit).
+- 네이밍/세션 품질 합성 16개 실패 0행: job `job_tniQIcZHsvPDYlXKpIWWoJ0PeyIj`.
+- 정상 후보/역순 퍼널/리텐션 구간 누락 합성 3개 실패 0행: job `job_sjKK2bvoZo__JAqXfxKvQ6eFdUC6`.
+- 실제 생성기의 공개 직전 흐름을 합성 입력·임시 후보만으로 실행: job `job_tzuMrbyQ7Fuf1uZntcxk_KOeKNza`, 결과 `all_candidate_checks_passed`.
+- 임시 후보에서 일별 period_n=7을 삭제한 실행은 `assert_gold_44_20_retention_grid`에서 차단: job `job_WbrgeuKfdsI9jegxxCKY_wdE8SXZ`.
+- 퍼널 시각을 원천에 없는 값으로 바꾼 실행은 `assert_gold_44_20_funnel_source`에서 차단: job `job_rAFJqYwI41z7a9i2nanbXCUICvIX`.
+
+모든 job은 Stage project, asia-northeast3다. 마지막 세 실행은 실제 Silver/Gold 참조 및 물리 공개 구간을 제거한 재현 SQL이며 실제 Gold 교체·트랜잭션 장애 복구를 검증한 것이 아니다. `scripts/gold_stage_regression.py`로 같은 합성 계약/컴파일 산출물에서 valid/missing_retention/funnel_without_source 시나리오 SQL을 재생성할 수 있다. 기존 dbt-core 1.12의 accepted_values 인자 deprecation 경고 1건은 유지한다.
+
+현재 상태: 세 코드 문제 보완·합성 회귀 검증 완료. Stage 실데이터·비용·실제 공동 공개/실패 복구·Superset 검증은 여전히 대기다. PR #31은 Draft로 유지하며 운영 Airflow 변경·병합·운영 배포를 수행하지 않는다.

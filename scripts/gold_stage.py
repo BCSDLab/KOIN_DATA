@@ -17,6 +17,62 @@ from gold_schema import TABLES, schema_sql
 ROOT = Path(__file__).resolve().parents[1]
 STAGE = 'koin-stage-438512'
 GATES = ('logging_deployed', 'coverage_verified', 'signup_verified', 'mapping_verified', 'session_verified')
+VALIDATION_NAMES = (
+    'assert_gold_44_20_input', 'assert_gold_44_20_naming',
+    'assert_gold_44_20_new_mapping_examples', 'assert_gold_44_20_invariants',
+    'assert_gold_44_20_retention_grid', 'assert_gold_44_20_funnel_source',
+    'assert_gold_44_20_batch', 'assert_mart_kpi_user_daily_nonnegative_activity',
+    'assert_mart_kpi_user_daily_unique_grain',
+)
+ARTIFACTS = {
+    **{n: Path('models/gold') / (n+'.sql') for n in TABLES},
+    **{n: Path('tests') / (n+'.sql') for n in VALIDATION_NAMES},
+    'gold_input_quality': Path('analyses/gold_input_quality.sql'),
+}
+
+
+def validate_naming_scope(p, publish=False):
+    scopes = p.get('naming_scopes', [])
+    if not isinstance(scopes, list):
+        raise ValueError('naming_scopes: list required')
+    for scope in scopes:
+        if scope.get('platform') not in ('WEB', 'ANDROID', 'IOS') or scope.get('event_name') not in ('DA1', 'DA2'):
+            raise ValueError('Explicit naming platform and DA1/DA2 required')
+        start, end = (dt.date.fromisoformat(scope[k]) for k in ('start_dt', 'end_dt'))
+        if start > end or start < dt.date.fromisoformat(p['logging_start_dt']):
+            raise ValueError('Invalid naming scope dates')
+        if not scope.get('evidence', '').strip():
+            raise ValueError('Naming scope deployment evidence required')
+    legacy = p.get('approved_legacy_labels', [])
+    if not isinstance(legacy, list):
+        raise ValueError('approved_legacy_labels: list required')
+    for item in legacy:
+        if item.get('platform') not in ('WEB', 'ANDROID', 'IOS') or item.get('event_name') not in ('DA1', 'DA2'):
+            raise ValueError('Exact legacy platform/event_name required')
+        if not re.fullmatch(r'[a-zA-Z0-9_]+', item.get('event_label', '')):
+            raise ValueError('Exact legacy label required; no patterns')
+        if item.get('event_category') not in ('click','select','scroll','swipe','submit','fail','exposure','toggle'):
+            raise ValueError('Approved legacy category required')
+        if not item.get('evidence', '').strip() or not item.get('source_url', '').startswith('https://'):
+            raise ValueError('Legacy approval evidence and source URL required')
+    if publish and not scopes:
+        raise ValueError('Publication blocked: naming_scopes with deployment evidence required')
+
+
+def compiled_path(target, name):
+    if name.startswith('generic:'):
+        short = name.split(':', 1)[1]
+        if not re.fullmatch(r'[A-Za-z0-9_]+', short):
+            raise ValueError('Invalid generic test name')
+        return target / 'gold_generic_checks' / (short+'.sql')
+    return target / 'compiled/koin_data' / ARTIFACTS[name]
+
+
+def generic_test_names(manifest):
+    parents = {'model.koin_data.'+n for n in TABLES}
+    return sorted('generic:'+n['name'] for n in manifest['nodes'].values()
+                  if n['resource_type']=='test' and n.get('test_metadata')
+                  and set(n['depends_on']['nodes']) & parents)
 
 
 def validate_contract(p, publish=False):
@@ -39,6 +95,7 @@ def validate_contract(p, publish=False):
     for key in ('session_inactivity_minutes', 'late_arrival_hours'):
         if type(p.get(key)) is not int or p[key] < 0:
             raise ValueError(f'{key}: non-negative integer required')
+    validate_naming_scope(p, publish)
     if publish:
         blocked = [g for g in GATES if p[g] is not True]
         if blocked:
@@ -82,8 +139,14 @@ def compile_models(p, dbt, target, offline=False):
         config = RuntimeConfig.from_args(get_flags())
         compiler = Compiler(config)
         for node in manifest_object.nodes.values():
-            if node.name in TABLES or 'gold_44_20' in node.tags or 'gold_44_20_fixture' in node.tags:
-                compiler.compile_node(node, manifest_object)
+            generic = (node.resource_type=='test' and getattr(node, 'test_metadata', None)
+                       and set(node.depends_on.nodes) & {'model.koin_data.'+n for n in TABLES})
+            if node.name in TABLES or 'gold_44_20' in node.tags or 'gold_44_20_fixture' in node.tags or generic:
+                compiled = compiler.compile_node(node, manifest_object)
+                if generic:
+                    path = compiled_path(target, 'generic:'+node.name)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(compiled.compiled_code)
     else:
         subprocess.run(base + ['parse'] + options, check=True, env=env)
         subprocess.run(base + ['compile', '--no-introspect', '--select', 'tag:gold_44_20'] + options,
@@ -97,9 +160,24 @@ def compile_models(p, dbt, target, offline=False):
     for source in manifest['sources'].values():
         if source['database'] != STAGE:
             raise ValueError('Non-Stage source in manifest')
-    hashes = {n: hashlib.sha256((target / 'compiled/koin_data/models/gold' / (n+'.sql')).read_bytes()).hexdigest()
-              for n in TABLES}
-    (target / 'gold_build_contract.json').write_text(json.dumps({'contract': p, 'sha256': hashes}, sort_keys=True, indent=2))
+    generic_names = generic_test_names(manifest)
+    if not generic_names:
+        raise ValueError('Gold generic column tests missing')
+    if not offline:
+        for name in generic_names:
+            node = next(n for n in manifest['nodes'].values()
+                        if n['name']==name.split(':',1)[1] and n['resource_type']=='test')
+            # dbt truncates long generic-test filenames (e.g. accepted_values).
+            files = list((target / 'compiled/koin_data').rglob(Path(node['path']).name))
+            if len(files)!=1:
+                raise ValueError('Compiled generic test missing or ambiguous: '+name)
+            path = compiled_path(target,name)
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text(files[0].read_text())
+    hashes = {n: hashlib.sha256(compiled_path(target, n).read_bytes()).hexdigest()
+              for n in list(ARTIFACTS)+generic_names}
+    (target / 'gold_build_contract.json').write_text(json.dumps(
+        {'contract': p, 'sha256': hashes, 'generic_checks': generic_names}, sort_keys=True, indent=2))
 
 
 def publication_sql(p, target):
@@ -107,12 +185,14 @@ def publication_sql(p, target):
     lock = json.loads((target / 'gold_build_contract.json').read_text())
     if lock['contract'] != p:
         raise ValueError('Compile contract differs from publication contract; recompile')
-    for n in TABLES:
-        path = target / 'compiled/koin_data/models/gold' / (n+'.sql')
-        if hashlib.sha256(path.read_bytes()).hexdigest() != lock['sha256'][n]:
+    generic_names = generic_test_names(json.loads((target / 'manifest.json').read_text()))
+    if not generic_names or lock.get('generic_checks')!=generic_names:
+        raise ValueError('Generic validation inventory changed; recompile')
+    for n in list(ARTIFACTS)+generic_names:
+        path = compiled_path(target, n)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != lock['sha256'].get(n):
             raise ValueError('Compiled SQL changed: ' + n)
-    queries = {n: (target / 'compiled/koin_data/models/gold' / (n + '.sql')).read_text().strip().rstrip(';')
-               for n in TABLES}
+    queries = {n: compiled_path(target,n).read_text().strip().rstrip(';') for n in list(ARTIFACTS)+generic_names}
     for q in queries.values():
         if 'kap-chat' in q or '2000-01-01' in q:
             raise ValueError('Unresolved or cross-environment SQL')
@@ -137,19 +217,20 @@ def publication_sql(p, target):
         f"AND DATE('{p['event_complete_dt']}') AND e.event_id IS NULL) AS \"Missing new-user D0\";",
         f'ASSERT NOT EXISTS(SELECT 1 FROM {event_input} WHERE event_dt IS NULL OR ({cutover} AND '
         '(event_ts IS NULL OR service_name IS NULL))) AS "Silver required columns";',
-        f'ASSERT (SELECT COUNT(*)>0 FROM {event_input} WHERE {cutover} AND '
-        "event_name IN ('DA1','DA2') AND ARRAY_LENGTH(SPLIT(event_label,'__')) IN (4,5)) "
-        'AS "New logging events absent";',
-        f'ASSERT NOT EXISTS(SELECT 1 FROM {event_input} WHERE {cutover} AND '
-        "event_name IN ('DA1','DA2') AND (event_label IS NULL OR "
-        "NOT REGEXP_CONTAINS(event_label,r'^[a-z][a-z0-9_]*(?:__[a-z][a-z0-9_]*){3,4}$') OR "
-        "ARRAY_LENGTH(SPLIT(event_label,'__')) NOT IN (4,5) OR "
-        "SPLIT(event_label,'__')[SAFE_OFFSET(ARRAY_LENGTH(SPLIT(event_label,'__'))-1)] "
-        'IS DISTINCT FROM event_category)) AS "Invalid new logging naming contract";',
     ]
     # Metadata-only contract check is insufficient: validate candidates before the transaction.
-    for n, q in queries.items():
-        sql.append(f'CREATE TEMP TABLE {n}_candidate AS (\n{q}\n);')
+    for n in TABLES:
+        sql.append(f'CREATE TEMP TABLE {n}_candidate AS (\n{queries[n]}\n);')
+    for name in list(VALIDATION_NAMES)+generic_names:
+        check = queries[name]
+        for model in TABLES:
+            check = check.replace(f'`{STAGE}`.`gold`.`{model}`', model+'_candidate')
+            check = check.replace(f'`{STAGE}.gold.{model}`', model+'_candidate')
+        if re.search(r'`[^`]*gold[^`]*`', check):
+            raise ValueError('Unbound live Gold reference in candidate test: '+name)
+        sql.append(f'ASSERT NOT EXISTS(\n{check}\n) AS "{name}";')
+    sql += [f'CREATE TEMP TABLE gold_input_quality_candidate AS (\n{queries["gold_input_quality"]}\n);',
+            'SELECT * FROM gold_input_quality_candidate ORDER BY event_dt,platform,reason;']
     u = 'mart_kpi_user_daily_candidate'
     m = 'mart_service_metrics_daily_candidate'
     sql += [
@@ -167,6 +248,9 @@ def publication_sql(p, target):
         f'ASSERT (SELECT COUNT(DISTINCT TO_JSON_STRING(STRUCT(build_id,user_snapshot_at,event_complete_start_dt,event_complete_dt)))=1 '
         f'FROM (SELECT build_id,user_snapshot_at,event_complete_start_dt,event_complete_dt FROM {u} UNION ALL '
         f'SELECT build_id,user_snapshot_at,event_complete_start_dt,event_complete_dt FROM {m})) AS "Mixed batch metadata";',
+        f'ASSERT NOT EXISTS(SELECT 1 FROM (SELECT build_id,user_snapshot_at FROM {u} UNION ALL '
+        f'SELECT build_id,user_snapshot_at FROM {m}) WHERE build_id IS DISTINCT FROM \'{p["build_id"]}\' '
+        f'OR user_snapshot_at IS DISTINCT FROM TIMESTAMP(\'{p["snapshot_at"]}\')) AS "Unexpected batch identity";',
         schema_sql(),
         'BEGIN TRANSACTION;',
     ]
@@ -180,7 +264,7 @@ def publication_sql(p, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['schema', 'compile', 'compile-offline', 'publish-sql'])
+    parser.add_argument('command', choices=['schema', 'compile', 'compile-offline', 'publish-sql', 'quality-sql'])
     parser.add_argument('--contract', type=Path)
     parser.add_argument('--target', type=Path, default=ROOT / 'dbt/target')
     parser.add_argument('--dbt', default='dbt')
@@ -193,6 +277,13 @@ def main():
     p = json.loads(args.contract.read_text())
     if args.command in ('compile', 'compile-offline'):
         compile_models(p, args.dbt, args.target, offline=args.command == 'compile-offline')
+    elif args.command == 'quality-sql':
+        validate_contract(p)
+        lock = json.loads((args.target / 'gold_build_contract.json').read_text())
+        query = compiled_path(args.target, 'gold_input_quality')
+        if lock['contract'] != p or hashlib.sha256(query.read_bytes()).hexdigest() != lock['sha256']['gold_input_quality']:
+            raise ValueError('Recompile quality SQL with the same contract')
+        print(query.read_text(), end='')
     else:
         print(publication_sql(p, args.target), end='')
 

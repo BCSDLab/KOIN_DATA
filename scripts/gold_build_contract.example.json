@@ -19,5 +19,7 @@
   "coverage_verified_evidence": "",
   "signup_verified_evidence": "",
   "mapping_verified_evidence": "",
-  "session_verified_evidence": ""
+  "session_verified_evidence": "",
+  "naming_scopes": [],
+  "approved_legacy_labels": []
 }
