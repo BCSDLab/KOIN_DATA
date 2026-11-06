@@ -1,0 +1,23 @@
+{
+  "build_id": "compile_only",
+  "snapshot_at": null,
+  "computed_at": null,
+  "logging_start_dt": null,
+  "event_complete_start_dt": null,
+  "event_complete_dt": null,
+  "metric_start_dt": null,
+  "metric_end_dt": null,
+  "funnel_version": "new_logging_v1_draft",
+  "logging_deployed": false,
+  "coverage_verified": false,
+  "signup_verified": false,
+  "mapping_verified": false,
+  "session_verified": false,
+  "session_inactivity_minutes": 0,
+  "late_arrival_hours": 0,
+  "logging_deployed_evidence": "",
+  "coverage_verified_evidence": "",
+  "signup_verified_evidence": "",
+  "mapping_verified_evidence": "",
+  "session_verified_evidence": ""
+}
