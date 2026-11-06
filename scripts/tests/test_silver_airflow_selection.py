@@ -1,6 +1,7 @@
 """Stage V2 전환의 실제 선택 정책·환경 차단·기존 일별 날짜 계약 검사."""
 
 import ast
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from importlib.util import module_from_spec, spec_from_file_location
@@ -20,10 +21,13 @@ validate_stage_silver_environment=_policy.validate_stage_silver_environment
 
 
 def stage_env():
-    return dict(DBT_TARGET="dev", KOIN_DATA_GCP_PROJECT="koin-stage-438512",
+    env = dict(DBT_TARGET="dev", KOIN_DATA_GCP_PROJECT="koin-stage-438512",
                 KOIN_DATA_GA4_PROJECT="koin-stage-438512", KOIN_DATA_GA4_DATASET="stage_events",
                 KOIN_DATA_APP_DB_PROJECT="koin-stage-438512", KOIN_DATA_APP_DB_DATASET="stage_users",
                 KOIN_DATA_SILVER_V2_ONLY="true", KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE="true")
+    env['KOIN_DATA_SILVER_SOURCE_CONTRACT']=json.dumps(dict(
+        {k:env[k] for k in _policy.SOURCE_KEYS},evidence='synthetic approval'))
+    return env
 
 
 def load_function(file, name, namespace):
@@ -54,6 +58,35 @@ class SilverAirflowSelectionTests(unittest.TestCase):
             env=stage_env(); env[key]=""
             with self.subTest(key=key), self.assertRaises(ValueError):
                 silver_selection("airflow_daily", env)
+
+    def test_approved_prod_reads_keep_stage_output(self):
+        env=stage_env()
+        for key in _policy.SOURCE_KEYS:
+            env[key]='kap-chat' if key.endswith('PROJECT') else 'analytics_432041405'
+        env['KOIN_DATA_SILVER_SOURCE_CONTRACT']=json.dumps(dict(
+            {k:env[k] for k in _policy.SOURCE_KEYS},evidence='approved prod reads only'))
+        validate_stage_silver_environment(env)
+        env['KOIN_DATA_GCP_PROJECT']='kap-chat'
+        with self.assertRaises(ValueError):validate_stage_silver_environment(env)
+
+    def test_source_contract_required_and_cannot_drift(self):
+        for value in ['', '{}', '[]', '{"evidence":""}', 'invalid json']:
+            with self.subTest(value=value),self.assertRaises(ValueError):
+                validate_stage_silver_environment(dict(stage_env(),KOIN_DATA_SILVER_SOURCE_CONTRACT=value))
+
+    def test_both_dags_use_same_single_slot_pool(self):
+        namespace={'silver_execution_options':_policy.silver_execution_options,
+                   'create_date_vars':lambda _: {},'DAILY_LOOKBACK_DAYS':3}
+        with patch.dict('os.environ',stage_env(),clear=True):
+            for file in ['dbt_ga4_daily.py','dbt_ga4_monthly.py']:
+                tree=ast.parse((DAGS/file).read_text())
+                dag=next(n for n in ast.walk(tree) if isinstance(n,ast.Call)
+                         and isinstance(n.func,ast.Name) and n.func.id=='DbtDag')
+                expr=next(k.value for k in dag.keywords if k.arg=='operator_args')
+                args=eval(compile(ast.Expression(expr),file,'eval'),namespace)
+                self.assertEqual(args['pool'],_policy.STAGE_WRITE_POOL)
+                self.assertEqual(args['pool_slots'],1)
+        self.assertEqual(_policy.silver_execution_options({}),{})
 
     def test_v2_blocks_prod_and_incomplete_bootstrap(self):
         for override in [{"DBT_TARGET":"prod"}, {"KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE":"false"},

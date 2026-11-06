@@ -6133,3 +6133,87 @@ kap-chat.analytics_432041405였음을 확인했다. 현재 실행 원천은 Stag
 범위 밖에 남은 과거 운영 원천 기반 이력과 최근 Stage 원천을 같은 모집단이라고
 가정하지 않는다. Gold 이력 비교/완전 구간 승인 전 출처 정합성 검증이 필요하다.
 해당 범위 밖 데이터 복구/재생성이나 Production 조회·쓰기는 수행하지 않았다.
+
+
+### 6.26 승인 원천 복구·User Snapshot 재계산·DAG 공통 쓰기 제어 (2026-11-06)
+
+사용자는 운영 원천 읽기→Stage 출력 방식으로 출처를 통일하고 Event와 User를
+함께 복구하도록 승인했다. 먼저 두 Stage DAG를 중지했다. 코드 버전d7ecba3,
+당시 원천/프로파일/기간 설정을 보존하고 현재 Event/User 및 혼합 전10:20UTC의
+Event/User Snapshot을 각각 만들었다(4개,7일 만료). 원본 실행 이력은 보존했다.
+Production 쓰기와 GitHub 병합은 하지 않는다.
+
+**출력과 원천 계약 분리**
+
+출력 프로젝트는 반드시 koin-stage-438512이고 프로파일은 dev다. GA4/앱 DB 원천은
+별도 KOIN_DATA_SILVER_SOURCE_CONTRACT JSON에 프로젝트·데이터셋4개 및 evidence를
+명시하고 실행 환경이 정확히 일치해야 한다. 이번 승인 원천은 두 source 모두
+kap-chat.analytics_432041405다. 출력까지 운영으로 바꾸거나 명시 계약 없이
+묵시적 기본 원천을 사용하는 것은 차단한다. 기존 Stage 원천 강제 정책을 대체한다.
+원천 계약/출력 제한의 성공·실패 회귀 검사를 추가했다.
+
+**Event/User 후보와 공동 복구**
+
+- Event는 변경된2026-10-02~11-05의35일만 승인 원천에서 재계산해 후보를 만들었다.
+- User는 MERGE 영향을 되돌리기 위해 혼합 전 Snapshot57732명을 기존 상태로 삼아
+  승인 원천으로 재계산했다. 현재57940명을 그대로 MERGE 입력으로 쓰지 않았다.
+- Stage 원천 작업으로 추가됐던208명 중 승인 원천에도 있는3명을 제외한205명은
+  후보에서 제거됐다. 승인 원천의 새 사용자412명을 반영해 후보58144명이 됐다.
+  혼합 전 기준 기존 사용자 변경은 Stage작업2198명, 승인 원천 후보2156명이다.
+- 속성별 비교에서 Stage작업으로 달라졌던 user_type1960건, signup_completed_at2169건,
+  is_deleted/is_mysql_mapped각1628건은 승인 원천 후보에서 혼합 전 값으로 돌아왔다.
+  first_seen_at9건도 복구됐다. 신규 관측에 따른 last_seen/지원 수/대표ID 등은
+  승인 원천 계산 결과를 사용하고 과거 행 수/속성을 억지로 맞추지 않았다.
+- 후보 generic15개+관계/범위/기존 User기간 보존3개 검사 모두 통과한 후 Stage의
+  35일 Event 교체와 User 전체 후보 교체를 하나의 트랜잭션으로 반영했다.
+  반영 전 동시 변경이 없는지 검사하고 commit 전 전체Event→User 관계도 검사했다.
+
+후보 Event1072813행, User58144행. 기존에 존재했던10월2일~11월1일의 Event는
+모두 후보와 같은 키/내용으로 복구됐고, 현재 승인 원천 재계산에서 새 키426개가
+추가 관측됐다. 기존 키 삭제/동일 키 내용 변경은0이다. 범위 밖은 날짜별 건수와
+전체 행 지문을 비교해 변경0일을 확인했다. 따라서 과거 건수와 같다는 이유만으로
+복구를 판단하지 않았다. source-repair Snapshot/후보는 Stage silver에만 생성했다.
+
+**DAG 간 쓰기 제어**
+
+Stage V2모드에서 daily/monthly의 모든 dbt실행·테스트 task에 같은
+koin_stage_silver_writes pool과pool_slots=1을 적용했다. 실제 Airflow pool도1slot이다.
+날짜 검증과 daily성공 대기 센서는 pool밖에 둔다. 같은 DAG내 max_active_runs=1과
+함께 사용하며, 일별·월별·수동 dbt쓰기 사이의 동시 실행을 막는다. 개별 task단위
+직렬화이므로 전체DAG가 한꺼번에 락을 보유하는 것은 아니고 두 모델의 통상 갱신을
+원자적으로 만든 것도 아니다. 직접CLI/BigQuery 복구는 이 pool밖이므로 DAG중지 후
+진행 중 쓰기가 없는 상태에서만 수행해야 한다.
+
+스케줄은 일별09시/최근3일, 월별1일12시/기존30일보정으로 유지했다. 새 로깅 매핑과
+Gold공개 플래그는 비활성이다. Production최초 적재·운영선택정책·리뷰/병합은 별도다.
+
+**검증 완료 결과**
+
+Python 전체49개 통과. 실제 운영 원천→Stage 경로에서09시 예약 재실행과 일별/월별
+수동 실행을 동시에 제출했다. 세 실행 모두 성공했고 공통pool의 dbt task12개의
+실제 시작/종료 구간을 비교해 겹침0건(서로 다른DAG간 겹침도0건)을 확인했다.
+월별은 실제09시daily성공을 기다렸으며 센서는쓰기pool밖에서 대기했다. Stage의
+두 스케줄은 기존 주기대로 복구했고 Production은 변경하지 않았다.
+
+최종 Event21,752,971행, User58,144행/고유키58,144개. User 최초 관측2024-05-03은
+보존됐고 마지막 관측은 승인원천의2026-11-05 23:58:30.714039이다. 보정35일의
+Event→User결합 누락0, 복구후 가입/유형/삭제/매핑 속성과 승인후보 불일치0.
+job_LbscFebWXCbkizx9dhnwoVxIHWuF. 이는 Gold 공개 승인이 아니다.
+
+근거: Snapshot job_QaoGUZcYj1AVBleyy0a3KrMH6MgJ,
+Event후보 job_0otKB109WCS4alW9aXYE4NlUTzPS,
+User후보 job_zaca9DiJ9yoect_zQOdjeXyVcgfn,
+후보검사 job_9eyrQ2pHomsbJAFyZbbW_2lJWWh9,
+User차이 job_Mh4xSoEp6lHCQpen1NJBDUwp9-xL,
+속성비교 job_FwCN6o0GUfsTci2BNdv3JbUq75tb,
+공동복구 job_qjYb-gH0f8_A5IZNAdJK-hhTTrIP,
+범위밖지문 job_HmSGzJRu3qx-89ZWX701YjLA20Ez,
+기존행비교 job_N5Vd3yIQm47N56fkgj5FzH3qtjDo.
+수동실행은 daily manual__2026-11-06T11:00:42.933699+00:00,
+monthly manual__2026-11-06T11:00:42.650786+00:00이며 실행·검사 모두success다.
+복구 전/혼합 전 Snapshot과 후보는7일 만료로 보존한다.
+
+Production 준비 시에는 현재 Stage전용 V2옵션을 그대로 운영에서 켜지 않는다.
+운영 두 테이블 존재/초기 범위/비용을 다시 확인하고 최초 적재와 품질 검사를 먼저
+수행해야 한다. 운영용 모델선택·공통쓰기pool과 기존silver_events 사용처 전환을
+별도로 검토한 뒤 운영스케줄을 변경한다. 이 작업에서 운영쓰기/병합은 하지 않았다.

@@ -10,7 +10,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.timetables.trigger import CronTriggerTimetable
 from cosmos import ExecutionConfig, ProfileConfig, ProjectConfig, RenderConfig
 from cosmos.constants import InvocationMode, TestBehavior
-from dbt_ga4_silver_selection import silver_selection, validate_stage_silver_environment, v2_only_enabled
+from dbt_ga4_silver_selection import silver_selection, silver_execution_options, validate_stage_silver_environment, v2_only_enabled
 
 DATE_PATTERN = re.compile(r"^\d{8}$")
 

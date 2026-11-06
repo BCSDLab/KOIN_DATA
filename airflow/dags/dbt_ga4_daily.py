@@ -21,6 +21,7 @@ from dbt_ga4_common import (
     create_profile_config,
     create_project_config,
     create_render_config,
+    silver_execution_options,
 )
 
 # GA4는 확정 데이터를 최근 며칠에 걸쳐 갱신하므로 매 실행 3일치를 다시 만든다.
@@ -33,7 +34,7 @@ dbt_ga4_daily = DbtDag(
     profile_config=create_profile_config(),
     execution_config=create_execution_config(),
     render_config=create_render_config("airflow_daily"),
-    operator_args={"vars": create_date_vars(DAILY_LOOKBACK_DAYS)},
+    operator_args={"vars": create_date_vars(DAILY_LOOKBACK_DAYS), **silver_execution_options()},
     # 전날 데이터를 KST 오전에 처리한다. GA4 확정 export가 도착할 시간을 준다.
     schedule=create_cron_schedule("0 9 * * *"),
     start_date=pendulum.datetime(2026, 7, 25, tz=SCHEDULE_TIMEZONE),

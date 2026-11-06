@@ -21,6 +21,7 @@ from dbt_ga4_common import (
     create_profile_config,
     create_project_config,
     create_render_config,
+    silver_execution_options,
 )
 from dbt_ga4_monthly_dates import (
     monthly_daily_logical_date,
@@ -42,6 +43,7 @@ dbt_ga4_monthly = DbtDag(
     execution_config=create_execution_config(),
     render_config=create_render_config("airflow_monthly"),
     operator_args={
+        **silver_execution_options(),
         "vars": {
             "start_date": "{{ monthly_date_var(ti.xcom_pull(task_ids='validate_dates'), 'start_date') }}",
             "end_date": "{{ monthly_date_var(ti.xcom_pull(task_ids='validate_dates'), 'end_date') }}",

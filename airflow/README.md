@@ -153,8 +153,9 @@ monthly는 이때 dbt 모델을 실행하지 않으므로 최초 적재 전에�
 | monthly | 매월 1일 12:00 | 예정일 30일 전부터 실제 실행일의 어제, daily 성공 대기 유지 |
 
 전환은 Stage(dev)에서만 허용한다. DAG 파싱과 첫 검증 task에서 출력 프로젝트,
-GA4/앱 DB 원천, 최초 적재 완료 설정을 확인한다. 스케줄러/작업 컨테이너 설정이
-달라 V2 옵션이 꺼지거나 원천이 운영으로 변경되면 검증 task가 실패하고 downstream을
+GA4/앱 DB 원천 계약, 최초 적재 완료 설정을 확인한다. 출력은 Stage에만 허용하고
+원천은 승인한 프로젝트·데이터셋과 정확히 일치해야 한다. V2 옵션이 꺼지거나
+원천이 승인 계약과 달라지면 검증 task가 실패하고 downstream을
 실행하지 않는다. 모든 Airflow 서비스에는 같은 환경 설정을 배포해야 한다.
 
 1. Stage daily/monthly를 일시정지하고 두 플래그를 false로 유지한다.
@@ -169,19 +170,28 @@ GA4/앱 DB 원천, 최초 적재 완료 설정을 확인한다. 스케줄러/작
 DBT_TARGET=dev
 KOIN_DATA_GCP_PROJECT=koin-stage-438512
 KOIN_DATA_BIGQUERY_LOCATION=asia-northeast3
-KOIN_DATA_GA4_PROJECT=koin-stage-438512
-KOIN_DATA_GA4_DATASET=analytics_427218788
-KOIN_DATA_APP_DB_PROJECT=koin-stage-438512
-KOIN_DATA_APP_DB_DATASET=analytics_427218788
+# 기존 이력과 같은 승인 원천: 운영 읽기 / Stage 출력
+KOIN_DATA_GA4_PROJECT=kap-chat
+KOIN_DATA_GA4_DATASET=analytics_432041405
+KOIN_DATA_APP_DB_PROJECT=kap-chat
+KOIN_DATA_APP_DB_DATASET=analytics_432041405
+KOIN_DATA_SILVER_SOURCE_CONTRACT={"KOIN_DATA_GA4_PROJECT":"kap-chat","KOIN_DATA_GA4_DATASET":"analytics_432041405","KOIN_DATA_APP_DB_PROJECT":"kap-chat","KOIN_DATA_APP_DB_DATASET":"analytics_432041405","evidence":"승인 기록 식별자"}
 # 아래 두 값은 최초 적재/입력 검증 후에만 true로 설정
 KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE=true
 KOIN_DATA_SILVER_V2_ONLY=true
 ```
 
-4. Stage Airflow 컨테이너를 재생성하고 DAG 재파싱 결과를 확인한다. 두 DAG의
+4. Airflow에 `koin_stage_silver_writes` pool을 **1 slot**으로 만든다. V2 모드의
+   두 DAG에 있는 모든 dbt 실행·테스트 task가 이 pool/1 slot을 사용한다. 날짜 검증과
+   daily 대기 센서는 pool 밖에 두므로 대기로 쓰기 슬롯을 점유하지 않는다. pool이
+   없으면 task가 실행되지 않으므로 생성/용량/실제 task 설정을 배포 시 확인한다.
+   이 pool은 여러 DAG의 dbt 쓰기를 직렬화한다. 두 모델의 원자적 갱신이나 전체
+   DAG 단위의 배타성을 보장하지 않으며 직접 dbt CLI/BigQuery 쓰기는 포함하지 않는다.
+   수동 복구/직접 쓰기 전에는 두 DAG를 멈추고 진행 중 쓰기가 없는지 확인한다.
+5. Stage Airflow 컨테이너를 재생성하고 DAG 재파싱 결과를 확인한다. 두 DAG의
    dbt 모델 task가 V2/User 두 개뿐인지 확인하고, 먼저 작은 날짜 범위의 daily를
    수동 실행한다. monthly에는 수동 날짜를 넣지 않는다.
-5. 날짜 범위·행 수·원천 최신성·재실행 결과와 각 모델 테스트가 통과한 후 스케줄을
+6. 날짜 범위·행 수·원천 최신성·재실행 결과와 각 모델 테스트가 통과한 후 스케줄을
    활성화한다. 기존 스케줄의 주기나 최근 3일 범위를 변경하지 않는다.
 
 선택 재현(모델/테스트 목록 조회이며 적재 없음):
@@ -220,3 +230,9 @@ true이면 daily는 세 모델을 선택한다는 점에 주의한다. 완전히
 
 `http://localhost:8080` 직통은 인증 토큰이 실리지 않아 로그인이 반복된다.
 반드시 https(Caddy)로 접속한다.
+
+복구 시 Event 날짜만 재계산해서 User MERGE 영향을 되돌릴 수는 없다. 현재 Event/User,
+변경 전 Snapshot, 실행 설정·원천·코드 근거를 먼저 보존하고 사용자 추가/변경/속성을
+비교한다. User 후보는 변경 전 상태를 기준으로 승인 원천에서 재계산해야 하며,
+잘못 추가된 사용자를 기존 MERGE만으로 남겨두지 않는다. 후보 품질·관계·범위 검사 후
+Stage에서만 반영하고, 원천과 달라진 모집단을 과거 행 수에 억지로 맞추지 않는다.

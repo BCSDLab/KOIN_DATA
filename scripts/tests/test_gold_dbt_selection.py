@@ -96,6 +96,10 @@ class DbtSelectionTests(unittest.TestCase):
                  KOIN_DATA_GA4_PROJECT='koin-stage-438512',KOIN_DATA_GA4_DATASET='stage_events',
                  KOIN_DATA_APP_DB_PROJECT='koin-stage-438512',KOIN_DATA_APP_DB_DATASET='stage_users',
                  KOIN_DATA_SILVER_V2_ONLY='true',KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE='true')
+        env['KOIN_DATA_SILVER_SOURCE_CONTRACT']=json.dumps(dict(
+            {k:env[k] for k in ['KOIN_DATA_GA4_PROJECT','KOIN_DATA_GA4_DATASET',
+                                'KOIN_DATA_APP_DB_PROJECT','KOIN_DATA_APP_DB_DATASET']},
+            evidence='synthetic only'))
         for tag in ['airflow_daily','airflow_monthly']:
             config=silver_selection(tag,env)
             with self.subTest(tag=tag):
