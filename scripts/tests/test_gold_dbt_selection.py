@@ -52,7 +52,7 @@ class DbtSelectionTests(unittest.TestCase):
         return {json.loads(n)['name'] if isinstance(n,str) else n['name'] for n in result.result}
 
     def assert_no_gold(self,names):
-        self.assertFalse({n for n in names if n.startswith('assert_gold_44_20')
+        self.assertFalse({n for n in names if n.startswith(('assert_gold_44_20','assert_silver_logging_v1'))
                           or 'mart_kpi_user_daily' in n or 'mart_service_metrics_daily' in n})
 
     def test_silver_models_exclude_gold_by_default(self):

@@ -5974,3 +5974,52 @@ python -m unittest discover -s scripts/tests -p 'test_silver*.py' -v
 하나의 거대 SELECT는 query-planning 복잡도 제한에 걸려 연결 검증을 CREATE TEMP TABLE 경계로 분리했다. 실패한 중간 실행을 통과 근거로 사용하지 않는다. 기존 dbt accepted_values 인자 경고는 유지한다.
 
 다음은 미결 매핑 의미(가입 4/5단계·실제 main·플랫폼 예외)와 실행 계약을 정리하고, 새 SDK 실제 수집 이후 적용 기간·버전·세션·User 입력·완전 구간을 검증하는 일이다. 그 전까지 Gold 공개는 차단하고 두 PR은 Draft로 유지한다. Stage/운영 적재·PR 병합·실제 공동 공개/복구·비용·Superset 검증은 이번 작업에 포함하지 않았다.
+
+
+### 6.23 PR 검토 보완: 서비스 분류·플랫폼 지원·전수 합성 검증 (2026-11-06)
+
+이 절은 6.22의 미등록 라벨 처리와 플랫폼 예외·검증 범위를 갱신한다. 44/20 물리 스키마와 동결 로깅 원문은 유지한다. 실제 새 로그 수집 확인을 뒤로 미룬 것은 개발 순서의 변경이며 공개 승인이 아니다.
+
+**서비스 분류와 퍼널 분리**
+
+`silver_logging_v1_classify`는 정확 일치 서비스 계약과 퍼널 계약을 분리한다. Notion에 근거가 있는 프로필 로그인·로그아웃·비밀번호 변경을 account 이용으로 포함하되 퍼널 단계·Entry/Core는 부여하지 않는다. 범위 안 대상 서비스의 미등록 라벨·owner/category/platform 불일치는 실제 활성 경로에서 ERROR로 계산을 중단한다. 기존 화면명으로 자동 복원하거나 unmapped로 조용히 누락하지 않는다. 승인된 구형 계약·적용 기간과 품절/실험 7개 원문 보존은 그대로다. diagnostic_only는 합성 검증의 오류 사례 관찰용이며 활성 모델에서 사용하지 않는다.
+
+등록 범위는 라벨 37종 / 근거 행 41개 / 플랫폼별 계약 86개다. 기존 77개를 전부 포함한다. 계정 비퍼널 계약 13개도 정상 분류 사례로 검사한다. 전체 280개 이벤트의 매핑 완료를 뜻하지 않으며 실제 관측된 미등록 라벨은 원문 근거를 추가하고 재검증해야 한다.
+
+**플랫폼·경로 처리**
+
+- iOS `main__main__more__click`: 정상 전체보기와 빈 식단 카드 콜백을 구분할 수 있는 필드 증거가 없다. cafeteria 서비스에는 포함하고 단계는 NULL로 둔다. 해당 콜백이 있는 세션의 식단 퍼널은 is_complete=false로 제외해 미확인 진입을 실제 이탈로 계산하지 않는다. 정상 경로의 완료율 활성화에는 추가 경로 증거가 필요하다.
+- WEB 시간표 카테고리: Notion 본문의 모바일웹 `/category` 근거를 반영했다. 정확 라벨·DA1·click·WEB에 더해 page_location이 `/category`, `/category/…`, `/category?…`, `/category#…`인 경우만 진입 단계로 분류한다. 경로가 없거나 다르면 활성 계산을 차단한다. 앱과 모든 WEB 경로를 일괄 허용하지 않는다.
+- 새로운 메인 방문을 논리 접두어나 서비스 진입으로 합성하지 않는다. 가입 4/5단계도 사용자 유형 선택·완료 버튼으로 대체하지 않는다.
+
+`gold_funnel_support`의 18개 계약은 다음과 같다. ‘지원’은 명세상 단계 경로가 있다는 의미이며 실제 배포·수집 검증 완료를 뜻하지 않는다.
+
+| 퍼널 | WEB | ANDROID | IOS |
+| --- | --- | --- | --- |
+| signup | 미지원: 4/5단계 미확인 | 미지원 | 미지원 |
+| shop | 지원 | 지원 | 지원 |
+| bus | 지원 | 지원 | 지원 |
+| cafeteria | 미지원: 공유 없음 | 지원 | 지원: more 콜백 세션 제외 |
+| timetable | 지원 | 미지원: 탐색 미매핑 | 미지원: 탐색 미매핑 |
+| board | 미지원: 탐색 미매핑 | 지원 | 지원 |
+
+지원하지 않는 퍼널은 is_complete=false이고 Superset reached_users는 유효 세션이 없으면 NULL(N/A)이다. 실제 이탈 0명과 구분한다. facts에 세션 플랫폼 컬럼이 없으므로 일별 platform_dominant를 세션 플랫폼 필터로 사용하지 않는다. 플랫폼별 지원표와 `gold_input_quality`의 미지원/경로 미확인 사유를 함께 확인한다.
+
+**공개 게이트**
+
+Gold 실행 계약에 main_visit_verified, main_visit_verified_evidence, main_visit_platforms, funnel_support_verified, funnel_support_verified_evidence를 추가했다. 기본은 false/빈 값이다. 공개 도구는 기존 배포·완전 구간·가입 원천·매핑·세션 조건과 함께 근거를 요구한다. 실제 메인 관측이 승인된 플랫폼만 서비스 퍼널의 완료 관측 대상이 될 수 있다. 지원표는 공개 SQL에서 후보 품질 결과와 함께 출력하며 트랜잭션 전에 기존 의미 검사 9개+일반 검사 50개를 실행한다. 가입 5단계는 지원표에서도 차단하므로 설정 true만으로 성공 퍼널이 되지 않는다.
+
+**검증**
+
+- Silver/Gold 실제 dbt 엔진 오프라인 컴파일 통과. 활성 Silver SELECT BigQuery dry-run 통과(추정 1,357,103 bytes). 실테이블 실행·교체 없음.
+- Silver Python 11개(파티션 5+게이트/계약 6), Gold 공개 게이트 12개 통과. 일반 Silver 단독·일별·월별과 Gold opt-in 선택 회귀 5개/12조합 통과. 비활성 합성 SQL은 본문 렌더링까지 격리해 기본 dbt parse에 영향을 주지 않는다.
+- 독립 고정 기대 카탈로그 `silver_logging_v1_expected.sql`의 86개 정상 입력: 서비스·단계·순서·Entry/Core·원문·행 수/중복 보존·account 이용 검사 실패 0행. job `job_8rSofXAoiVH9dFK2IIHryHI5fOSJ`.
+- 기존 경계/구형/동결 포함 44개 입력 매핑 검사 실패 0행. job `job_4S9mS_0Cf1euOIErALQHTLS4p231`.
+- Silver→Gold 27이벤트 연결과 활동·퍼널·리텐션·구간 검사 실패 0행. job `job_4GLIjSSmWZAL_CuvE3G7ntNi1GpL`. 합성 main은 실제 수집 증거가 아니다.
+- Gold 지원표·미지원·main 게이트·NULL 지표·iOS 모호 세션 7개 검사 실패 0행. job `job_dZsd_-N6Z_Hc1byof2HJ1PHbD13W`.
+- 최종 Gold 후보 검증 9개+일반 검사 50개 모두 통과: job `job_zlzuS0rUmTX6XulMsWZEwnWAoQLm`. 실제 공개 DML은 제거한 합성 스크립트이며 지원표·품질 보고까지 실행했다.
+- 실제 strict 분기의 미등록 라벨은 `Silver v1 service contract missing`으로 차단: job `job_pvtZgTdDxUlcI7dsJultWYW-eTmg`. 잘못된 WEB 경로도 `Silver v1 route contract missing`으로 차단: job `job_4l_5aNzOOBWg6v4bzmJvF7V1cZUh`. 두 실행은 의도한 실패 검증이다.
+
+모든 합성 실행은 Stage asia-northeast3의 SELECT/임시 테이블이며 실제 Silver/Gold 원천을 대체 입력으로 사용하지 않았다. 일반 모델 dry-run은 문법·참조 확인이고 실제 데이터 정확성 검증이 아니다. 초기 개발 중 실패한 구문/파싱 실행은 통과 근거에 포함하지 않는다. 기존 accepted_values 인자 경고는 남아 있다.
+
+PR #31과 #32는 Draft를 유지한다. #32는 #31 브랜치를 대상으로 하며 #31 처리 후 대상 브랜치와 차이를 다시 확인한다. 다음은 새 SDK 수집 이후 실제 적용 기간·플랫폼/버전·메인/가입 증거·Silver User/세션/완전 구간 검증, Stage Gold 수치·비용·공개/실패 복구 검증이다. 운영 Airflow·실제 테이블 공개·GitHub 병합은 수행하지 않는다.

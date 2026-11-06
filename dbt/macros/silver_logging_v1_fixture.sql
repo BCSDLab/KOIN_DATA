@@ -62,7 +62,7 @@ raw_mock_events as (
    c.legacy_service as service_name,c.legacy_stage as funnel_stage,
    c.legacy_order as service_step_order,coalesce(c.legacy_stage='entry',false) as is_entry_event,
    coalesce(c.legacy_stage='call',false) as is_core_action),
-   c.legacy_order as step_order,if(c.legacy_service='main','global','service') as stage_scope,
+   cast(null as string) as page_location,c.legacy_order as step_order,if(c.legacy_service='main','global','service') as stage_scope,
    c.test_group,c.expected_service,c.expected_stage,c.expected_order
  from fixture_events e cross join raw_cases c where e.event_id='e1'
 ),

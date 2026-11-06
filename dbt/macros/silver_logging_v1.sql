@@ -37,7 +37,13 @@
  ('account__identity_verification__sign_up__code_verify_success__click','DA2','click','account','identity_verification',['WEB','ANDROID','IOS'],'9dd0221954bc83328f3101973bcaff2b'),
  ('account__user_type_selection__sign_up__user_type__click','DA2','click','account',none,['ANDROID','IOS'],'9bd0221954bc833c845a818f39ef8ca0'),
  ('account__user_type_selection__sign_up__user_type__click','DA2','click','account',none,['WEB'],'6400221954bc829089cb01755624814f'),
- ('account__input_user_info__sign_up__confirm__click','DA2','click','account',none,['WEB','ANDROID','IOS'],'4830221954bc8355887e01f988251647')
+ ('account__input_user_info__sign_up__confirm__click','DA2','click','account',none,['WEB','ANDROID','IOS'],'4830221954bc8355887e01f988251647'),
+ ('main__main__more__click','DA1','click','cafeteria',none,['IOS'],'4730221954bc829a90e7818e5ed78bd7','ios_more_unverified'),
+ ('timetable__main_category__timetable_entry__category_entry__click','DA1','click','timetable','entry',['WEB'],'e9d0221954bc828aa337812594729789','mobile_web_category'),
+ ('account__main_profile__login__entry__click','DA2','click','account',none,['ANDROID','IOS'],'2660221954bc82719b1b01589fd83c1b'),
+ ('account__main_profile__logout__click','DA2','click','account',none,['ANDROID','IOS'],'6d90221954bc83a8839d01823f621620'),
+ ('account__password_change__password_change__confirm__click','DA2','click','account',none,['ANDROID','IOS'],'1250221954bc82a5bdb38115ed63b652'),
+ ('account__password_change__password_change__confirm__click','DA2','click','account',none,['WEB'],'1150221954bc8217aaee812619b3653f')
 ] %}
 {{ return(rules) }}
 {% endmacro %}
@@ -50,7 +56,7 @@
  'cafeteria__dining__soldout__submit','cafeteria__dining__soldout__exit']) }}
 {% endmacro %}
 
-{% macro silver_logging_v1_classify(relation,scopes=none,legacy_labels=none) %}
+{% macro silver_logging_v1_classify(relation,scopes=none,legacy_labels=none,diagnostic_only=false) %}
 {% if target.name != 'dev' or target.database != 'koin-stage-438512' %}
   {{ exceptions.raise_compiler_error('Silver logging v1 draft is Stage-only') }}
 {% endif %}
@@ -79,16 +85,28 @@
   {% set end = modules.datetime.datetime.strptime(r.end_dt,'%Y-%m-%d').date() %}
   {% if start>end %}{{ exceptions.raise_compiler_error('Invalid legacy interval') }}{% endif %}
 {% endfor %}
-with rules as (
+{% if diagnostic_only and var('silver_logging_validation_enabled',false) is not sameas true %}
+ {{ exceptions.raise_compiler_error('Diagnostic mode requires explicit synthetic validation') }}
+{% endif %}
+with rule_contracts as (
   select r.* except(platforms),platform
   from unnest(array<struct<event_label string,event_name string,event_category string,
-    service_name string,funnel_stage string,platforms array<string>>>[
+    service_name string,funnel_stage string,platforms array<string>,route_policy string>>[
   {% for r in silver_logging_v1_rules() %}
     struct('{{ r[0] }}','{{ r[1] }}','{{ r[2] }}','{{ r[3] }}',
       {{ "'"~r[4]~"'" if r[4] is not none else 'cast(null as string)' }},
-      [{% for p in r[5] %}'{{ p }}'{% if not loop.last %},{% endif %}{% endfor %}]){% if not loop.last %},{% endif %}
+      [{% for p in r[5] %}'{{ p }}'{% if not loop.last %},{% endif %}{% endfor %}],
+      '{{ r[7] if r|length>7 else 'any' }}'){% if not loop.last %},{% endif %}
   {% endfor %}
   ]) r cross join unnest(r.platforms) platform
+),
+service_rules as (
+ select distinct event_label,event_name,event_category,platform,service_name,route_policy
+ from rule_contracts
+),
+funnel_rules as (
+ select event_label,event_name,event_category,platform,funnel_stage,route_policy
+ from rule_contracts where funnel_stage is not null
 ),
 scopes as (
  {% for s in scopes %}
@@ -121,10 +139,24 @@ eligible as (
 ),
 mapped as (
  select e.* replace(
-   if(e.apply_v1,coalesce(r.service_name,'unmapped'),e.service_name) as service_name,
-   if(e.apply_v1,r.funnel_stage,e.funnel_stage) as funnel_stage)
- from eligible e left join rules r on e.apply_v1 and e.event_label=r.event_label
-   and e.event_name=r.event_name and e.event_category=r.event_category and e.platform=r.platform
+   case when not e.apply_v1 then e.service_name
+     when sr.service_name is not null then sr.service_name
+     {% if diagnostic_only %}else 'unmapped'
+     {% else %}else error('Silver v1 service contract missing; publication blocked')
+     {% endif %}end as service_name,
+   case when not e.apply_v1 then e.funnel_stage
+     when sr.route_policy='mobile_web_category' and not coalesce(
+       regexp_contains(e.page_location,r'^https?://[^/]+/category(?:[/?#]|$)'),false)
+       {% if diagnostic_only %}then cast(null as string)
+       {% else %}then error('Silver v1 route contract missing; publication blocked'){% endif %}
+     else fr.funnel_stage end as funnel_stage)
+ from eligible e
+ left join service_rules sr on e.apply_v1 and e.event_label=sr.event_label
+   and e.event_name=sr.event_name and e.event_category=sr.event_category and e.platform=sr.platform
+ left join funnel_rules fr on e.apply_v1 and e.event_label=fr.event_label
+   and e.event_name=fr.event_name and e.event_category=fr.event_category and e.platform=fr.platform
+   and (fr.route_policy!='mobile_web_category' or
+     regexp_contains(e.page_location,r'^https?://[^/]+/category(?:[/?#]|$)'))
 ),
 ordered as (
  select m.* replace(case when m.apply_v1 then case

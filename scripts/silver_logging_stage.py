@@ -42,7 +42,8 @@ def compile_offline(target, synthetic_model=False):
             compiler.compile_node(node,manifest)
             selected.append(node.name)
     required = {'silver_events_v2','assert_silver_logging_v1_mapping_fixture',
-                'assert_silver_logging_v1_gold_fixture'}
+                'assert_silver_logging_v1_gold_fixture','assert_silver_logging_v1_all_contracts',
+                'assert_silver_logging_v1_unknown_rejected','assert_silver_logging_v1_route_rejected'}
     if not required <= set(selected):
         raise ValueError('Silver synthetic validations missing')
     (target/'silver_logging_compile_summary.json').write_text(json.dumps({

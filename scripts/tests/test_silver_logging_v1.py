@@ -34,11 +34,28 @@ def module(target=None,variables=None):
 
 
 class SilverLoggingTests(unittest.TestCase):
+    def test_every_platform_contract_has_independent_expected_result(self):
+        with self.assertRaises(Returned) as result:
+            module().silver_logging_v1_rules()
+        rules=result.exception.value
+        env=Environment(undefined=StrictUndefined,extensions=['jinja2.ext.do'])
+        expected_module=env.from_string((ROOT/'dbt/macros/silver_logging_v1_expected.sql').read_text()).make_module({'return':returned})
+        with self.assertRaises(Returned) as result:
+            expected_module.silver_logging_v1_expected_contracts()
+        expected=result.exception.value
+        actual={(r[0],r[1],r[2],p):(r[3],r[4],r[7] if len(r)>7 else 'any')
+                for r in rules for p in r[5]}
+        oracle={(r[0],r[1],r[2],r[3]):(r[4],r[5],r[9]) for r in expected}
+        self.assertEqual(len(expected),86)
+        self.assertEqual(len(actual),86)
+        self.assertEqual(actual,oracle)
+
     def test_rule_keys_unique_and_sources_present(self):
         with self.assertRaises(Returned) as result:
             module().silver_logging_v1_rules()
         keys=[]
-        for label,owner,category,service,stage,platforms,source in result.exception.value:
+        for row in result.exception.value:
+            label,owner,category,service,stage,platforms,source = row[:7]
             self.assertRegex(source,r'^[0-9a-f]{32}$')
             self.assertEqual(label.split('__')[-1],category)
             self.assertIn(owner,['DA1','DA2'])
