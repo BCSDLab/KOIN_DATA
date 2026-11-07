@@ -1016,5 +1016,12 @@ classified as (
 
 )
 
+{% if var('silver_logging_v1_enabled', false) is sameas true %}
+-- Stage opt-in only: preserve legacy classification and exact frozen labels.
+select * from (
+{{ silver_logging_v1_classify('classified') }}
+)
+{% else %}
 select *
 from classified
+{% endif %}

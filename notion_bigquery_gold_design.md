@@ -5914,3 +5914,112 @@ python scripts/gold_stage.py quality-sql --contract <실행계약.json> --target
 추가 재현 검사는 `scripts/tests/test_gold_dbt_selection.py`다. dbt-bigquery가 설치된 환경에서 `python -m unittest discover -s scripts/tests -p test_gold_dbt_selection.py -v`로 실행한다. dbt 미설치 시 skip되므로 그 상태를 격리 검증 통과로 취급하지 않는다. 이번 검증은 dbt-core 1.12.6 / bigquery adapter 1.9.2 환경에서 실제로 실행했다. 컴파일의 기존 accepted_values deprecation 경고와 반복 dbtRunner 호출의 라이브러리 ResourceWarning/DeprecationWarning은 테스트 실패가 아니다.
 
 이번 변경은 테스트 활성화/선택과 누락 방지에 한정된다. 계산 SQL 62개가 이전과 동일해 BigQuery 합성 실행을 반복하지 않았다. BigQuery 실제 적재·SDK 배포·Stage 실데이터/비용/공개 복구·운영 Airflow·병합은 수행하지 않았으며 PR #31은 Draft를 유지한다. 사용자는 Silver도 직접 담당한다고 범위를 확장했으나 이번 PR 수정에서 Silver 매핑을 변경하지는 않았다. 다음 단계는 Silver 신·구 로깅 매핑과 입력 계약 정리다.
+
+
+### 6.22 새 로깅 Silver 매핑 초안 및 합성 Silver→Gold 검증 (2026-11-06)
+
+사용자는 Silver도 직접 담당한다고 명시했고, 새 SDK 로그 수집 확인은 Gold 공개 전으로 미루되 Notion 명세 기반 구현과 합성 검증을 먼저 진행하도록 승인했다. 이번 절은 그 범위의 결과다. 실제 수집·배포·실데이터 검증으로 승격하지 않는다.
+
+Gold PR #31(09dde93)은 그대로 두고, 그 브랜치 위에서 `feat/silver-logging-v1-mapping`을 분리했다. Silver 변경은 별도 Draft PR로 검토하며 #31에 의존한다. 실제 Stage 테이블·운영 Airflow·Notion 원문은 수정하지 않는다.
+
+**구현**
+
+- 기존 Silver Event의 분류 CASE와 출력 스키마는 유지한다. 마지막에 Stage 전용 opt-in 매핑을 적용하는 분기만 추가했다. 기본 비활성 SQL은 09dde93과 공백 정규화 비교 시 동일하다. ID 선정·사용자 결합·가입 원천·기존 Android custom_session_id 정책은 바꾸지 않는다.
+- `silver_logging_v1_enabled=false`, `silver_logging_validation_enabled=false`, `silver_logging_v1_scopes=[]`, `silver_logging_v1_legacy_labels=[]`가 기본값이다. 켜려면 실제 플랫폼·DA1/DA2·적용 시작/종료일·근거가 필요하다. prod target 또는 Stage 외 프로젝트는 컴파일에서 차단한다.
+- 새 매핑은 원문 event_label/event_name/event_category/platform 정확 일치다. 라벨의 접두어만으로 서비스·퍼널 단계를 추정하지 않는다. 선언된 범위의 대상 서비스 신형 라벨이 미등록/잘못된 owner·category·플랫폼이면 unmapped/단계 NULL로 남겨 기존 화면명 때문에 main으로 잘못 분류되는 것을 방지한다. 범위 밖과 대상 외 서비스는 기존 결과를 유지한다.
+- 구형 단일 구간 라벨과 기존 분류 기간을 보존한다. 신·구 구조형 라벨이 같은 기간에 섞이면 `silver_logging_v1_legacy_labels`에 platform/event_name/event_label/event_category/start_dt/end_dt/source_url/evidence를 정확히 등록해 기존 분류를 유지한다. wildcard는 허용하지 않는다. 실제 앱/SDK 버전 필드는 검증되지 않았으므로 버전별 적용 완료라고 하지 않는다.
+- 품절 결과형 라벨 및 기존 품절/실험 6개 라벨은 원문과 기존 분류를 그대로 통과시킨다. 품절 기능·A/B·category·value·전송 조건은 재설계하거나 분석하지 않았다. 이 보존 목록이 Gold의 실제 입력 승인/구형 예외 등록을 대신하지는 않는다.
+
+**Notion 근거와 매핑 범위**
+
+[통합 가이드](https://app.notion.com/p/3c30221954bc8214b1c481c5bbb6fba5), [공통 네이밍 규칙](https://app.notion.com/p/4000221954bc81469ea6dbe19c7d8be7), [네이밍 사전](https://app.notion.com/p/38b0221954bc831b912c012d8af2c857)과 각 개별 새 로깅 본문을 읽었다. 카탈로그 `silver_logging_v1_rules`의 각 행에 개별 원문 page ID를 기록했다. 라벨 34종 / 근거 행 35개 / 플랫폼별 계약 77개이며, 280개 전체 로깅의 전수 매핑 완료를 뜻하지 않는다.
+
+| 분석 서비스 | 구현한 단계·행동 | 플랫폼·미결 사항 |
+| --- | --- | --- |
+| shop | 목록 진입 / 상점 상세 클릭 / 전화 클릭 | 구 모바일 홈 전체보기와 새 WEB 인기 카드 구분. WEB 미확인 전체보기를 자동 허용하지 않음 |
+| bus | 버스 진입 / 출발·도착 확인 / 조회 클릭 | 실제 main 접두 라벨도 분석 대상은 bus. 논리 main 방문으로 중복 생성하지 않음 |
+| cafeteria | 카드·전체보기·헤더 진입 / 식사 시간 선택 / 공유 클릭 | 공유는 ANDROID/IOS만. iOS 빈 카드 more 공유 콜백 때문에 해당 more 경로는 미결로 제외 |
+| timetable | 헤더·카테고리·프로필 진입 / 검색·학기·커리큘럼 선택 / 이미지 저장 클릭 | WEB 전용 탐색과 모바일 공통 동작 구분 |
+| board | 공지 진입 / 검색 진입·실행 / 공지 선택 | WEB 제목 진입과 앱 하단 네비 진입 구분 |
+| account | 가입 시작 / 약관 동의 / 인증 성공 | 학생·외부인 선택과 완료 버튼은 account로만 분류하고 퍼널 단계는 NULL |
+
+가입 4단계의 ‘정보 입력 완료’ 관측과 5단계의 성공 조건은 현행 V2 명세에서 입증하지 못했다. [학생·외부인 선택](https://app.notion.com/p/9bd0221954bc833c845a818f39ef8ca0)을 form_entry로 대체하지 않으며, [회원가입 완료 버튼](https://app.notion.com/p/4830221954bc8355887e01f988251647)은 기존 click/value/발생 조건 보존 명세이므로 서버 성공으로 해석하지 않는다. 인증 성공만 [번호 일치 시점 명세](https://app.notion.com/p/9dd0221954bc83328f3101973bcaff2b)를 근거로 단계 3에 둔다. 실제 메인 방문을 증명할 새 이벤트도 임의로 만들지 않는다.
+
+**파일 및 재현**
+
+- 실제 모델 연결: `dbt/models/silver/silver_events_v2.sql`
+- 정확 일치 카탈로그·Stage/범위/예외 게이트: `dbt/macros/silver_logging_v1.sql`
+- 합성 입력: `dbt/macros/silver_logging_v1_fixture.sql`
+- SELECT형 매핑 검사: `dbt/tests/assert_silver_logging_v1_mapping_fixture.sql`
+- 임시 Silver→Gold 연결 스크립트: `dbt/analyses/assert_silver_logging_v1_gold_fixture.sql`
+- 컴파일 도구: `scripts/silver_logging_stage.py`, Python 게이트 검사: `scripts/tests/test_silver_logging_v1.py`
+
+```bash
+python scripts/silver_logging_stage.py --target <임시산출물디렉터리>
+python scripts/silver_logging_stage.py --target <임시산출물디렉터리> --synthetic-model
+python -m unittest discover -s scripts/tests -p 'test_silver*.py' -v
+```
+
+두 컴파일 명령은 DB 접속/모델 실행이 없다. 기본은 합성 검증만 활성화하며, synthetic-model 옵션도 합성 기간으로 활성 분기의 SQL을 컴파일할 뿐이다. 운영 로깅 적용일을 설정하는 명령이 아니다. summary의 logging_deployed/coverage_verified/mapping_verified는 false다. 합성 fixture 안의 true 플래그는 계산 사례만을 위한 것이며 실행 계약 템플릿을 바꾸지 않는다.
+
+**검증 결과**
+
+- dbt parse와 실제 엔진 오프라인 컴파일(기본 분기·활성 분기) 통과. 실제 활성 Silver SELECT의 BigQuery dry-run 통과.
+- Python 10개: 기존 파티션 5개 + 새 Stage/범위/예외/카탈로그 5개 통과.
+- 기존 Gold 선택 격리 회귀 5개 통과. 일반 Silver 일별·월별에 Gold 검사가 섞이지 않음.
+- 합성 매핑 입력 44개: 정상 경로 27이벤트 + 오류/구형/동결/범위/논리 main 사례 17개. 행별 기대 분류와 행 수·중복·원문/ID 보존·구형/품절 결과 보존 검사 실패 0행. job `job_UG-ImMtGeq73vJK54bUzBonO3x_y`.
+- 합성 Silver→Gold 연결: 임시 분류 결과 27이벤트와 합성 User 입력으로 사용자 활동·5개 서비스 4단계 경로·가입 단계 3까지만 도달·가입 D1·서비스 D1·범위 D1~D7·불변식·리텐션 57/9구간 검사 실패 0행. job `job_w2O34WcczKiEkpZ14sL4LnJAKwVP`.
+- 두 실행은 koin-stage-438512 / asia-northeast3이며 실제 Silver/Gold 테이블을 읽거나 교체하지 않았다. 연결 스크립트의 main 시작점은 명시적으로 주입한 합성 기존 main 사실이다. 실제 새 SDK의 main 관측 증거가 아니다. User 데이터도 합성 입력이며 silver__users 원천/결합 SQL의 실데이터 검증을 대체하지 않는다.
+
+하나의 거대 SELECT는 query-planning 복잡도 제한에 걸려 연결 검증을 CREATE TEMP TABLE 경계로 분리했다. 실패한 중간 실행을 통과 근거로 사용하지 않는다. 기존 dbt accepted_values 인자 경고는 유지한다.
+
+다음은 미결 매핑 의미(가입 4/5단계·실제 main·플랫폼 예외)와 실행 계약을 정리하고, 새 SDK 실제 수집 이후 적용 기간·버전·세션·User 입력·완전 구간을 검증하는 일이다. 그 전까지 Gold 공개는 차단하고 두 PR은 Draft로 유지한다. Stage/운영 적재·PR 병합·실제 공동 공개/복구·비용·Superset 검증은 이번 작업에 포함하지 않았다.
+
+
+### 6.23 PR 검토 보완: 서비스 분류·플랫폼 지원·전수 합성 검증 (2026-11-06)
+
+이 절은 6.22의 미등록 라벨 처리와 플랫폼 예외·검증 범위를 갱신한다. 44/20 물리 스키마와 동결 로깅 원문은 유지한다. 실제 새 로그 수집 확인을 뒤로 미룬 것은 개발 순서의 변경이며 공개 승인이 아니다.
+
+**서비스 분류와 퍼널 분리**
+
+`silver_logging_v1_classify`는 정확 일치 서비스 계약과 퍼널 계약을 분리한다. Notion에 근거가 있는 프로필 로그인·로그아웃·비밀번호 변경을 account 이용으로 포함하되 퍼널 단계·Entry/Core는 부여하지 않는다. 범위 안 대상 서비스의 미등록 라벨·owner/category/platform 불일치는 실제 활성 경로에서 ERROR로 계산을 중단한다. 기존 화면명으로 자동 복원하거나 unmapped로 조용히 누락하지 않는다. 승인된 구형 계약·적용 기간과 품절/실험 7개 원문 보존은 그대로다. diagnostic_only는 합성 검증의 오류 사례 관찰용이며 활성 모델에서 사용하지 않는다.
+
+등록 범위는 라벨 37종 / 근거 행 41개 / 플랫폼별 계약 86개다. 기존 77개를 전부 포함한다. 계정 비퍼널 계약 13개도 정상 분류 사례로 검사한다. 전체 280개 이벤트의 매핑 완료를 뜻하지 않으며 실제 관측된 미등록 라벨은 원문 근거를 추가하고 재검증해야 한다.
+
+**플랫폼·경로 처리**
+
+- iOS `main__main__more__click`: 정상 전체보기와 빈 식단 카드 콜백을 구분할 수 있는 필드 증거가 없다. cafeteria 서비스에는 포함하고 단계는 NULL로 둔다. 해당 콜백이 있는 세션의 식단 퍼널은 is_complete=false로 제외해 미확인 진입을 실제 이탈로 계산하지 않는다. 정상 경로의 완료율 활성화에는 추가 경로 증거가 필요하다.
+- WEB 시간표 카테고리: Notion 본문의 모바일웹 `/category` 근거를 반영했다. 정확 라벨·DA1·click·WEB에 더해 page_location이 `/category`, `/category/…`, `/category?…`, `/category#…`인 경우만 진입 단계로 분류한다. 경로가 없거나 다르면 활성 계산을 차단한다. 앱과 모든 WEB 경로를 일괄 허용하지 않는다.
+- 새로운 메인 방문을 논리 접두어나 서비스 진입으로 합성하지 않는다. 가입 4/5단계도 사용자 유형 선택·완료 버튼으로 대체하지 않는다.
+
+`gold_funnel_support`의 18개 계약은 다음과 같다. ‘지원’은 명세상 단계 경로가 있다는 의미이며 실제 배포·수집 검증 완료를 뜻하지 않는다.
+
+| 퍼널 | WEB | ANDROID | IOS |
+| --- | --- | --- | --- |
+| signup | 미지원: 4/5단계 미확인 | 미지원 | 미지원 |
+| shop | 지원 | 지원 | 지원 |
+| bus | 지원 | 지원 | 지원 |
+| cafeteria | 미지원: 공유 없음 | 지원 | 지원: more 콜백 세션 제외 |
+| timetable | 지원 | 미지원: 탐색 미매핑 | 미지원: 탐색 미매핑 |
+| board | 미지원: 탐색 미매핑 | 지원 | 지원 |
+
+지원하지 않는 퍼널은 is_complete=false이고 Superset reached_users는 유효 세션이 없으면 NULL(N/A)이다. 실제 이탈 0명과 구분한다. facts에 세션 플랫폼 컬럼이 없으므로 일별 platform_dominant를 세션 플랫폼 필터로 사용하지 않는다. 플랫폼별 지원표와 `gold_input_quality`의 미지원/경로 미확인 사유를 함께 확인한다.
+
+**공개 게이트**
+
+Gold 실행 계약에 main_visit_verified, main_visit_verified_evidence, main_visit_platforms, funnel_support_verified, funnel_support_verified_evidence를 추가했다. 기본은 false/빈 값이다. 공개 도구는 기존 배포·완전 구간·가입 원천·매핑·세션 조건과 함께 근거를 요구한다. 실제 메인 관측이 승인된 플랫폼만 서비스 퍼널의 완료 관측 대상이 될 수 있다. 지원표는 공개 SQL에서 후보 품질 결과와 함께 출력하며 트랜잭션 전에 기존 의미 검사 9개+일반 검사 50개를 실행한다. 가입 5단계는 지원표에서도 차단하므로 설정 true만으로 성공 퍼널이 되지 않는다.
+
+**검증**
+
+- Silver/Gold 실제 dbt 엔진 오프라인 컴파일 통과. 활성 Silver SELECT BigQuery dry-run 통과(추정 1,357,103 bytes). 실테이블 실행·교체 없음.
+- Silver Python 11개(파티션 5+게이트/계약 6), Gold 공개 게이트 12개 통과. 일반 Silver 단독·일별·월별과 Gold opt-in 선택 회귀 5개/12조합 통과. 비활성 합성 SQL은 본문 렌더링까지 격리해 기본 dbt parse에 영향을 주지 않는다.
+- 독립 고정 기대 카탈로그 `silver_logging_v1_expected.sql`의 86개 정상 입력: 서비스·단계·순서·Entry/Core·원문·행 수/중복 보존·account 이용 검사 실패 0행. job `job_8rSofXAoiVH9dFK2IIHryHI5fOSJ`.
+- 기존 경계/구형/동결 포함 44개 입력 매핑 검사 실패 0행. job `job_4S9mS_0Cf1euOIErALQHTLS4p231`.
+- Silver→Gold 27이벤트 연결과 활동·퍼널·리텐션·구간 검사 실패 0행. job `job_4GLIjSSmWZAL_CuvE3G7ntNi1GpL`. 합성 main은 실제 수집 증거가 아니다.
+- Gold 지원표·미지원·main 게이트·NULL 지표·iOS 모호 세션 7개 검사 실패 0행. job `job_dZsd_-N6Z_Hc1byof2HJ1PHbD13W`.
+- 최종 Gold 후보 검증 9개+일반 검사 50개 모두 통과: job `job_zlzuS0rUmTX6XulMsWZEwnWAoQLm`. 실제 공개 DML은 제거한 합성 스크립트이며 지원표·품질 보고까지 실행했다.
+- 실제 strict 분기의 미등록 라벨은 `Silver v1 service contract missing`으로 차단: job `job_pvtZgTdDxUlcI7dsJultWYW-eTmg`. 잘못된 WEB 경로도 `Silver v1 route contract missing`으로 차단: job `job_4l_5aNzOOBWg6v4bzmJvF7V1cZUh`. 두 실행은 의도한 실패 검증이다.
+
+모든 합성 실행은 Stage asia-northeast3의 SELECT/임시 테이블이며 실제 Silver/Gold 원천을 대체 입력으로 사용하지 않았다. 일반 모델 dry-run은 문법·참조 확인이고 실제 데이터 정확성 검증이 아니다. 초기 개발 중 실패한 구문/파싱 실행은 통과 근거에 포함하지 않는다. 기존 accepted_values 인자 경고는 남아 있다.
+
+PR #31과 #32는 Draft를 유지한다. #32는 #31 브랜치를 대상으로 하며 #31 처리 후 대상 브랜치와 차이를 다시 확인한다. 다음은 새 SDK 수집 이후 실제 적용 기간·플랫폼/버전·메인/가입 증거·Silver User/세션/완전 구간 검증, Stage Gold 수치·비용·공개/실패 복구 검증이다. 운영 Airflow·실제 테이블 공개·GitHub 병합은 수행하지 않는다.
