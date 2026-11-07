@@ -6254,3 +6254,35 @@ Stage 전용 옵션은 false, 신규 로깅 매핑·Gold 인증/공개는 계속
 - 기존 silver_events는 일별 갱신을 유지한다. V2 단독 전환·사용처 변경은 하지 않았다.
 - PR #34는 #33 기반 Draft로 유지한다. 신규 로깅 매핑과 Gold 공개·실데이터 지표 인증은
   이번 Silver 배포와 별개이며 아직 활성화하지 않았다.
+
+### 6.28 사용자 원천 CDC 재적재·Silver 계정 속성 복구 (2026-11-07)
+
+사용자 요청으로 mysql-users-prod의 koin.users 객체를 전체 재적재했다.
+원천 연결·대상 프로젝트·기존 스키마는 유지했다. 복구 전 원천을 동일 analytics 데이터셋에
+koin_users_before_cdc_recovery_20261107로 복사하고, Silver User를
+silver__users_before_cdc_recovery_20261107 Snapshot으로 보존했다(각 7일 만료).
+일별·월별 DAG를 잠시 중지하고 활성 실행 0건을 확인한 뒤 복구했으며, 완료 후 둘 다 재개했다.
+
+- Datastream 재적재: 09:48:07~09:48:11 KST COMPLETED, 스트림 RUNNING/오류 없음.
+- 원천 논리 조회: 6,227→6,261행, id 고유 6,261, 새 ID 34/기존 ID 제거 0건.
+  최신 created_at은 2026-09-25T12:30:22Z→2026-11-06T17:48:17Z로 전진했다.
+- 기존 max_staleness=1시간은 최신 CDC 데이터가 있어도 구 저장본을 반환했다.
+  0초 최신 조회로 복구분을 확인하고, 최종 Datastream dataFreshness=60s와
+  BigQuery max_staleness=1분으로 일치시켰다. 더 잦은 CDC 병합/쿼리 비용이 발생할 수 있다.
+- 일반 증분 User build(reconcile_window=false, 11월 4~6일)를 운영 서비스 계정으로 실행했다.
+  User 58,144행 유지, 계정 속성 23행 갱신, 키·대표 ID·first/last_seen 변경 0건.
+  dbt 검사 5개 통과, 원천 대비 계정 속성 불일치·중복/Null 키·미래 가입일 0건.
+- 오늘 정기 09시 DAG는 09:02:33 성공했고 V2 10검사/User 5검사 모두 통과했다.
+  서버 runtime 39958d3과 GitHub PR #34의 실행 파일 53개 해시가 모두 일치한다.
+- 일별 다음 실행 11월 8일 09시, 월별 12월 1일 12시 KST. 기존 Event 병행 유지.
+- GA4 events_20261106은 확인 시 미도착이다. 최근 내보내기 LOAD 오류는 없었으며,
+  GA4 일별 내보내기 시각은 보장되지 않는다. 원천 도착 전 해당 날짜를 생성/대체하지 않았다.
+  GA4 Admin 설정 조회는 OAuth scope 부족으로 확인하지 못했다. 도착 후 재처리와 커버리지
+  확인이 남으며, 최신 일자까지 완료됐다고 인증하지 않는다.
+- MySQL 직접 SQL 전수 대조는 하지 않았다. 기존 연결을 통한 Datastream 전체 재적재와
+  BigQuery·Silver 정합성 검증 결과다. Gold·가입 퍼널/리텐션·Superset 공개 검증은 별도다.
+
+근거 Job: koin_cdc_recovery_backups_20261107_v1,
+koin_cdc_recovery_force_fresh_read_20261107_v1,
+koin_cdc_recovery_final_quality_20261107_v1.
+상세 로컬 기록: /mnt/c/Users/sm222/koin_cdc_recovery_20261107.json.
