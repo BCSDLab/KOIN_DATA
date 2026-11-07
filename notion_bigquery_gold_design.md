@@ -6286,3 +6286,35 @@ silver__users_before_cdc_recovery_20261107 Snapshot으로 보존했다(각 7일 
 koin_cdc_recovery_force_fresh_read_20261107_v1,
 koin_cdc_recovery_final_quality_20261107_v1.
 상세 로컬 기록: /mnt/c/Users/sm222/koin_cdc_recovery_20261107.json.
+### 6.29 새 원천 스냅샷으로 사용자 ID·삭제 상태·날짜 전수 대조 (2026-11-07)
+
+직접 MySQL SQL 접속 정보 없이도 검증할 수 있도록, 사용자 승인하에 기존 Datastream
+연결을 재사용하는 별도 검증 스트림 mysql-users-verify-20261107을 만들었다.
+운영과 분리된 kap-chat.verification_users_20261107에 id/is_deleted/created_at/
+updated_at/user_type 다섯 컬럼만 새로 읽었다. 비밀번호·연락처 등은 복사하지 않았다.
+검증 테이블은 24시간 만료(2026-11-08 10:12:52 KST)이며 접근 범위는 기존 원천 이하로 유지했다.
+
+- 새 객체의 자동 전체 읽기: 10:12:42~10:12:52 KST COMPLETED.
+- 새 스냅샷과 운영 원천 각각 6,261행. 시간을 두고 두 차례 전수 비교했다.
+- 운영에만 남은 ID 0, 운영에 없는 ID 0, 삭제 상태 차이 0, 사용자 유형 차이 0.
+- created_at/updated_at 값 차이 0, 두 경로 사이 정확한 9시간 차이 0.
+- 검증 테이블 ID 중복·Null, 잘못된 삭제 상태, 미래 created_at 모두 0건.
+- 새 스냅샷과 Silver 58,144행 대조: 매핑 대상 3,356명, 매핑/계정 속성 차이 0,
+  미래 signup_completed_at 0건. 차이가 없어 추가 데이터 보정은 하지 않았다.
+- Datastream discover로 원천 id가 PK이며 created_at/updated_at은 MySQL TIMESTAMP인 것을 확인했다.
+  BigQuery도 TIMESTAMP, Silver는 그대로 보존하고 Gold에서 DATE(...,'Asia/Seoul')로 변환한다.
+  최신 가입 시각은 UTC 2026-11-06 17:48:17 / KST 2026-11-07 02:48:17이다.
+- 단, 동일한 Datastream 변환 경로를 사용하는 별도 전체 읽기다. MySQL 세션/서버 시간대를
+  직접 측정하거나 모든 변환의 공통 오류 가능성까지 배제한 결과는 아니다.
+- 미래 updated_at 2건은 새 스냅샷에도 동일하게 존재한다. 원천 clock/session/application 확인이
+  남아 있으며 임의의 9시간 보정은 하지 않았다. updated_at은 현재 Gold 가입 원천에 사용하지 않는다.
+- 운영 Airflow·운영 원천 스트림은 유지했고, 작업 중 운영 데이터·설정은 변경하지 않았다.
+  일별 다음 11월 8일 09시/월별 12월 1일 12시 KST, 네 서비스 건강 상태 정상.
+- 정리 상태: 검증 스트림 중지·삭제가 완료됐다. 삭제 Operation DONE/오류 없음과
+  해당 스트림 GET 404를 확인했다. 비교 테이블만 하루 만료로 보존한다.
+
+근거: koin_users_fresh_source_comparison_20261107_v1/v2,
+job_1Va7RiIWCAHLnuKuwpZ_6TT-RmUd, job_NHIuuQfFuJY0TUcEQrbIW1ADxn_5.
+상세 로컬 기록: /mnt/c/Users/sm222/koin_user_source_verification_20261107.json.
+가입 퍼널·리텐션·실제 메인 방문·GA4 일자 완전성 등 Gold 공개 게이트는 별도이며,
+이번 비교 결과만으로 Gold/Superset 전체를 검증 완료로 처리하지 않는다.
