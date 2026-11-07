@@ -10,7 +10,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.timetables.trigger import CronTriggerTimetable
 from cosmos import ExecutionConfig, ProfileConfig, ProjectConfig, RenderConfig
 from cosmos.constants import InvocationMode, TestBehavior
-from dbt_ga4_silver_selection import silver_selection, silver_execution_options, validate_stage_silver_environment, v2_only_enabled
+from dbt_ga4_silver_selection import silver_selection, silver_execution_options, validate_silver_environment, v2_execution_enabled
 
 DATE_PATTERN = re.compile(r"^\d{8}$")
 
@@ -105,7 +105,7 @@ def create_date_vars(lookback_days: int) -> dict[str, str]:
 
 def validate_conf_dates(dag_run: Any = None, stage_v2_required: bool = False, **_: Any) -> None:
     """수동 실행 날짜를 dbt에 전달하기 전에 형식과 순서를 검증한다."""
-    validate_stage_silver_environment(require_v2=stage_v2_required)
+    validate_silver_environment(require_v2=stage_v2_required)
     conf = (dag_run.conf if dag_run else None) or {}
     start_date, end_date = conf.get("start_date"), conf.get("end_date")
 
@@ -135,5 +135,5 @@ def create_date_validation_task() -> PythonOperator:
     return PythonOperator(
         task_id="validate_dates",
         python_callable=validate_conf_dates,
-        op_kwargs={"stage_v2_required": v2_only_enabled()},
+        op_kwargs={"stage_v2_required": v2_execution_enabled()},
     )

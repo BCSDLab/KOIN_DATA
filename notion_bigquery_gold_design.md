@@ -6217,3 +6217,104 @@ Production 준비 시에는 현재 Stage전용 V2옵션을 그대로 운영에�
 운영 두 테이블 존재/초기 범위/비용을 다시 확인하고 최초 적재와 품질 검사를 먼저
 수행해야 한다. 운영용 모델선택·공통쓰기pool과 기존silver_events 사용처 전환을
 별도로 검토한 뒤 운영스케줄을 변경한다. 이 작업에서 운영쓰기/병합은 하지 않았다.
+
+
+### 6.27 Production Silver 병행 배포 정책 (2026-11-06)
+
+사용자가 Stage 검증 후 운영 배포 준비·최초 적재·검증·스케줄 활성화를 요청했다.
+출력과 GA4/app_db 입력은 kap-chat / analytics_432041405에 고정한다.
+Event 최초 범위는 2024-07-11~2026-11-05, User는 원천 전체 2024-05-03~2026-11-05다.
+운영 원본 Event와 사용처를 유지하고 KOIN_DATA_SILVER_PROD_MODE=parallel로 시작한다.
+일별은 silver_events + silver_events_v2 + silver__users, 월별은 V2/User 두 모델이다.
+기존 일별 09시·최근 3일, 월별 1일 정오·30일 보정과 당일 09시 성공 의존을 유지한다.
+Stage 전용 옵션은 false, 신규 로깅 매핑·Gold 인증/공개는 계속 비활성이다.
+원천 계약·두 모델 최초 적재 검증 JSON·BOOTSTRAP_COMPLETE를 모두 요구한다.
+기존 사용처 전환 증거 없이는 운영 v2_only를 차단한다.
+운영 공통 pool koin_prod_silver_writes 1 slot으로 일별·월별·수동 dbt task를 직렬화한다.
+풀은 직접 SQL 작업이나 전체 DAG의 원자성을 보장하지 않는다.
+라이브 체크아웃 대신 별도 release와 Airflow 전용 Compose overlay를 사용한다.
+이 절의 배포 결과는 실제 적재·실행 확인 후 아래에 기록한다.
+
+
+운영 배포·검증 결과:
+- 실행 코드: 39958d3, 별도 release `/home/ubuntu/koin-releases/silver-prod-39958d3`.
+- Event 21,752,971행, 2024-07-11~2026-11-05 연속 848일. User 58,144행,
+  최초 관측 2024-05-03, 사용자 키 중복·필수값 누락·Event 결합 누락 0건.
+- 운영 서비스 계정 dbt 품질 검사 15개 통과. 로컬 회귀 50개 + 운영 dbt 선택 검사 1개 통과.
+- 실제 일별 수동 검증과 월별 예약 실행 모두 성공. 두 DAG의 dbt task 10개가 공통 풀에서
+  겹침 없이 실행됐다. 월별은 활성화 후 11월 1일 예약분이 생성되어 10월 2일~11월 5일을
+  보정했고, 실행 당일 11월 6일 09시 daily 성공을 확인했다.
+- 일별 다음 실행 11월 7일 09시 KST, 월별 다음 실행 12월 1일 12시 KST.
+- API·Scheduler·Dag Processor·Triggerer 정상, DAG 로딩 오류 0건.
+- 라이브 main 체크아웃과 dashboard_assets/는 보존. 원본 .env/Compose/컨테이너 설정/
+  DAG 상태/메타데이터를 비공개 백업했으며, 기본 Compose도 release overlay를 계속 사용한다.
+- 후보·검증 근거 job: `koin_prod_bootstrap_silver_events_v2_20261106_v1`,
+  `koin_prod_bootstrap_silver__users_20261106_v1`, `koin_prod_bootstrap_validation_20261106_v2`,
+  `koin_prod_silver_initial_publish_20261106_v1`, `koin_prod_silver_postwrite_validation_20261106_v1`.
+- 기존 silver_events는 일별 갱신을 유지한다. V2 단독 전환·사용처 변경은 하지 않았다.
+- PR #34는 #33 기반 Draft로 유지한다. 신규 로깅 매핑과 Gold 공개·실데이터 지표 인증은
+  이번 Silver 배포와 별개이며 아직 활성화하지 않았다.
+
+### 6.28 사용자 원천 CDC 재적재·Silver 계정 속성 복구 (2026-11-07)
+
+사용자 요청으로 mysql-users-prod의 koin.users 객체를 전체 재적재했다.
+원천 연결·대상 프로젝트·기존 스키마는 유지했다. 복구 전 원천을 동일 analytics 데이터셋에
+koin_users_before_cdc_recovery_20261107로 복사하고, Silver User를
+silver__users_before_cdc_recovery_20261107 Snapshot으로 보존했다(각 7일 만료).
+일별·월별 DAG를 잠시 중지하고 활성 실행 0건을 확인한 뒤 복구했으며, 완료 후 둘 다 재개했다.
+
+- Datastream 재적재: 09:48:07~09:48:11 KST COMPLETED, 스트림 RUNNING/오류 없음.
+- 원천 논리 조회: 6,227→6,261행, id 고유 6,261, 새 ID 34/기존 ID 제거 0건.
+  최신 created_at은 2026-09-25T12:30:22Z→2026-11-06T17:48:17Z로 전진했다.
+- 기존 max_staleness=1시간은 최신 CDC 데이터가 있어도 구 저장본을 반환했다.
+  0초 최신 조회로 복구분을 확인하고, 최종 Datastream dataFreshness=60s와
+  BigQuery max_staleness=1분으로 일치시켰다. 더 잦은 CDC 병합/쿼리 비용이 발생할 수 있다.
+- 일반 증분 User build(reconcile_window=false, 11월 4~6일)를 운영 서비스 계정으로 실행했다.
+  User 58,144행 유지, 계정 속성 23행 갱신, 키·대표 ID·first/last_seen 변경 0건.
+  dbt 검사 5개 통과, 원천 대비 계정 속성 불일치·중복/Null 키·미래 가입일 0건.
+- 오늘 정기 09시 DAG는 09:02:33 성공했고 V2 10검사/User 5검사 모두 통과했다.
+  서버 runtime 39958d3과 GitHub PR #34의 실행 파일 53개 해시가 모두 일치한다.
+- 일별 다음 실행 11월 8일 09시, 월별 12월 1일 12시 KST. 기존 Event 병행 유지.
+- GA4 events_20261106은 확인 시 미도착이다. 최근 내보내기 LOAD 오류는 없었으며,
+  GA4 일별 내보내기 시각은 보장되지 않는다. 원천 도착 전 해당 날짜를 생성/대체하지 않았다.
+  GA4 Admin 설정 조회는 OAuth scope 부족으로 확인하지 못했다. 도착 후 재처리와 커버리지
+  확인이 남으며, 최신 일자까지 완료됐다고 인증하지 않는다.
+- MySQL 직접 SQL 전수 대조는 하지 않았다. 기존 연결을 통한 Datastream 전체 재적재와
+  BigQuery·Silver 정합성 검증 결과다. Gold·가입 퍼널/리텐션·Superset 공개 검증은 별도다.
+
+근거 Job: koin_cdc_recovery_backups_20261107_v1,
+koin_cdc_recovery_force_fresh_read_20261107_v1,
+koin_cdc_recovery_final_quality_20261107_v1.
+상세 로컬 기록: /mnt/c/Users/sm222/koin_cdc_recovery_20261107.json.
+### 6.29 새 원천 스냅샷으로 사용자 ID·삭제 상태·날짜 전수 대조 (2026-11-07)
+
+직접 MySQL SQL 접속 정보 없이도 검증할 수 있도록, 사용자 승인하에 기존 Datastream
+연결을 재사용하는 별도 검증 스트림 mysql-users-verify-20261107을 만들었다.
+운영과 분리된 kap-chat.verification_users_20261107에 id/is_deleted/created_at/
+updated_at/user_type 다섯 컬럼만 새로 읽었다. 비밀번호·연락처 등은 복사하지 않았다.
+검증 테이블은 24시간 만료(2026-11-08 10:12:52 KST)이며 접근 범위는 기존 원천 이하로 유지했다.
+
+- 새 객체의 자동 전체 읽기: 10:12:42~10:12:52 KST COMPLETED.
+- 새 스냅샷과 운영 원천 각각 6,261행. 시간을 두고 두 차례 전수 비교했다.
+- 운영에만 남은 ID 0, 운영에 없는 ID 0, 삭제 상태 차이 0, 사용자 유형 차이 0.
+- created_at/updated_at 값 차이 0, 두 경로 사이 정확한 9시간 차이 0.
+- 검증 테이블 ID 중복·Null, 잘못된 삭제 상태, 미래 created_at 모두 0건.
+- 새 스냅샷과 Silver 58,144행 대조: 매핑 대상 3,356명, 매핑/계정 속성 차이 0,
+  미래 signup_completed_at 0건. 차이가 없어 추가 데이터 보정은 하지 않았다.
+- Datastream discover로 원천 id가 PK이며 created_at/updated_at은 MySQL TIMESTAMP인 것을 확인했다.
+  BigQuery도 TIMESTAMP, Silver는 그대로 보존하고 Gold에서 DATE(...,'Asia/Seoul')로 변환한다.
+  최신 가입 시각은 UTC 2026-11-06 17:48:17 / KST 2026-11-07 02:48:17이다.
+- 단, 동일한 Datastream 변환 경로를 사용하는 별도 전체 읽기다. MySQL 세션/서버 시간대를
+  직접 측정하거나 모든 변환의 공통 오류 가능성까지 배제한 결과는 아니다.
+- 미래 updated_at 2건은 새 스냅샷에도 동일하게 존재한다. 원천 clock/session/application 확인이
+  남아 있으며 임의의 9시간 보정은 하지 않았다. updated_at은 현재 Gold 가입 원천에 사용하지 않는다.
+- 운영 Airflow·운영 원천 스트림은 유지했고, 작업 중 운영 데이터·설정은 변경하지 않았다.
+  일별 다음 11월 8일 09시/월별 12월 1일 12시 KST, 네 서비스 건강 상태 정상.
+- 정리 상태: 검증 스트림 중지·삭제가 완료됐다. 삭제 Operation DONE/오류 없음과
+  해당 스트림 GET 404를 확인했다. 비교 테이블만 하루 만료로 보존한다.
+
+근거: koin_users_fresh_source_comparison_20261107_v1/v2,
+job_1Va7RiIWCAHLnuKuwpZ_6TT-RmUd, job_NHIuuQfFuJY0TUcEQrbIW1ADxn_5.
+상세 로컬 기록: /mnt/c/Users/sm222/koin_user_source_verification_20261107.json.
+가입 퍼널·리텐션·실제 메인 방문·GA4 일자 완전성 등 Gold 공개 게이트는 별도이며,
+이번 비교 결과만으로 Gold/Superset 전체를 검증 완료로 처리하지 않는다.

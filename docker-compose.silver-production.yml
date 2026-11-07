@@ -1,0 +1,27 @@
+# Use with the live server's unchanged base Compose file. Only Airflow services
+# mount the isolated release; Postgres, Superset and Caddy remain in place.
+x-silver-release: &silver-release
+  env_file:
+    - path: ${KOIN_DATA_SILVER_RELEASE_ENV:?absolute release env file required}
+      required: true
+  volumes:
+    - ${KOIN_DATA_SILVER_RELEASE_DIR:?absolute release directory required}/airflow/dags:/opt/airflow/dags:ro
+    - ${KOIN_DATA_SILVER_RELEASE_DIR}/dbt:/opt/airflow/dbt
+
+services:
+  airflow-webserver:
+    <<: *silver-release
+  airflow-scheduler:
+    <<: *silver-release
+  airflow-dag-processor:
+    extends:
+      file: docker-compose.yml
+      service: airflow-scheduler
+    <<: *silver-release
+    command: dag-processor
+  airflow-triggerer:
+    extends:
+      file: docker-compose.yml
+      service: airflow-scheduler
+    <<: *silver-release
+    command: triggerer

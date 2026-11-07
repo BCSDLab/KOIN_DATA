@@ -88,6 +88,30 @@ class SilverAirflowSelectionTests(unittest.TestCase):
                 self.assertEqual(args['pool_slots'],1)
         self.assertEqual(_policy.silver_execution_options({}),{})
 
+    def test_production_parallel_retains_legacy(self):
+        env=stage_env()
+        env.update(DBT_TARGET='prod',KOIN_DATA_GCP_PROJECT='kap-chat',
+                   KOIN_DATA_SILVER_V2_ONLY='false',KOIN_DATA_SILVER_PROD_MODE='parallel',
+                   KOIN_DATA_GA4_PROJECT='kap-chat',KOIN_DATA_APP_DB_PROJECT='kap-chat')
+        env['KOIN_DATA_SILVER_SOURCE_CONTRACT']=json.dumps(dict(
+            {k:env[k] for k in _policy.SOURCE_KEYS},evidence='production approval'))
+        env['KOIN_DATA_SILVER_PROD_BOOTSTRAP_EVIDENCE']=json.dumps(dict(
+            project='kap-chat',models=list(_policy.V2_MODELS),tests_passed=True,evidence='validation jobs'))
+        self.assertEqual(_policy.silver_selection('airflow_daily',env)['select'],
+                         ['tag:airflow_daily,silver_events','tag:airflow_daily,silver_events_v2','tag:airflow_daily,silver__users'])
+        self.assertEqual(_policy.silver_execution_options(env),dict(pool='koin_prod_silver_writes',pool_slots=1))
+        for override in [{'KOIN_DATA_GCP_PROJECT':'koin-stage-438512'},
+                         {'KOIN_DATA_SILVER_PROD_BOOTSTRAP_EVIDENCE':''},
+                         {'KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE':'false'},
+                         {'KOIN_DATA_SILVER_V2_ONLY':'true'},
+                         {'KOIN_DATA_SILVER_PROD_MODE':'v2_only'}]:
+            with self.subTest(override=override),self.assertRaises(ValueError):
+                _policy.silver_selection('airflow_daily',dict(env,**override))
+        env.update(KOIN_DATA_SILVER_PROD_MODE='v2_only',KOIN_DATA_SILVER_LEGACY_CONSUMERS_VERIFIED='true',
+                   KOIN_DATA_SILVER_LEGACY_CONSUMERS_EVIDENCE='downstream migration verified')
+        self.assertEqual(len(_policy.silver_selection('airflow_daily',env)['select']),2)
+        self.assertEqual(len(_policy.silver_selection('airflow_monthly',env)['select']),2)
+
     def test_v2_blocks_prod_and_incomplete_bootstrap(self):
         for override in [{"DBT_TARGET":"prod"}, {"KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE":"false"},
                          {"KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE":""}, {"KOIN_DATA_SILVER_V2_ONLY":"yes"}]:
@@ -107,7 +131,7 @@ class SilverAirflowSelectionTests(unittest.TestCase):
     def test_monthly_runtime_guard_runs_before_date_planning(self):
         planned=[]
         fn=load_function("dbt_ga4_monthly.py", "prepare_validated_monthly_window", {
-            "validate_stage_silver_environment":validate_stage_silver_environment,
+            "validate_silver_environment":validate_stage_silver_environment,
             "prepare_monthly_window":lambda **ctx:planned.append(ctx) or {"ok":True}})
         with patch.dict("os.environ",stage_env(),clear=True):
             self.assertEqual(fn(stage_v2_required=True), {"ok":True})
@@ -118,7 +142,7 @@ class SilverAirflowSelectionTests(unittest.TestCase):
 
     def test_daily_runtime_guard_rejects_environment_change(self):
         fn=load_function("dbt_ga4_common.py", "validate_conf_dates", {
-            "validate_stage_silver_environment":validate_stage_silver_environment,
+            "validate_silver_environment":validate_stage_silver_environment,
             "DATE_PATTERN":re.compile(r"^\d{8}$"), "Any":object})
         with patch.dict("os.environ",stage_env(),clear=True):
             fn(stage_v2_required=True)
