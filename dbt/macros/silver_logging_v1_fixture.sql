@@ -36,7 +36,7 @@ raw_cases as (
   struct('wrong_owner','u1','WEB','bus__bus_search__search__click','DA2','click','unmapped',null,null,'edge',0,1,'main','main',0),
   struct('wrong_platform','u1','WEB','cafeteria__cafeteria__share__kakao__click','DA1','click','unmapped',null,null,'edge',0,1,'main','main',0),
   struct('wrong_case','u1','WEB','BUS__bus_search__search__click','DA1','click','unmapped',null,null,'edge',0,1,'main','main',0),
-  struct('logical_main','u1','WEB','main__main__navigation__main_entry__click','DA2','click','unmapped',null,null,'edge',0,1,'main','main',0),
+  struct('logical_main','u1','WEB','main__main__navigation__main_entry__click','DA2','click','main',null,null,'edge',0,1,'main','main',0),
   struct('frozen_typo','u1','WEB','cafeteria__dining__soldout__submit_typo','DA1','click','unmapped',null,null,'edge',0,1,'main','main',0),
   struct('outside_scope','u1','WEB','bus__bus_search__search__click','DA1','click','main','main',0,'edge',-1,0,'main','main',0),
   struct('legacy','u1','WEB','shop_call','DA1','click','shop','call',3,'edge',0,0,'shop','call',3),

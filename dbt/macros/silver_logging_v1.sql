@@ -101,8 +101,18 @@ with rule_contracts as (
   ]) r cross join unnest(r.platforms) platform
 ),
 service_rules as (
- select distinct event_label,event_name,event_category,platform,service_name,route_policy
+ select distinct event_label,event_name,event_category,platform,service_name,route_policy,
+   coalesce(funnel_stage='entry',false) as entry_flag
  from rule_contracts
+ union all
+ select r.event_label,r.event_name,r.event_category,r.platform,r.service_name,'any',r.entry_flag
+ from unnest(array<struct<event_label string,event_name string,event_category string,
+   service_name string,platform string,entry_flag bool,source_page string>>[
+ {% for r in silver_logging_v1_service_catalog() %}
+ struct('{{ r[0] }}','{{ r[1] }}','{{ r[2] }}','{{ r[3] }}','{{ r[4] }}',
+   {{ 'true' if r[5] else 'false' }},'{{ r[6] }}'){% if not loop.last %},{% endif %}
+ {% endfor %}
+ ]) r
 ),
 funnel_rules as (
  select event_label,event_name,event_category,platform,funnel_stage,route_policy
@@ -128,7 +138,8 @@ eligible as (
  select e.*,exists(select 1 from scopes s where s.platform=e.platform and s.event_name=e.event_name
    and e.event_dt between s.start_dt and s.end_dt)
    and split(lower(coalesce(e.event_label,'')),'__')[safe_offset(0)]
-     in ('main','account','shop','bus','cafeteria','timetable','board')
+     in ('main','account','shop','bus','cafeteria','timetable','board',
+         'banner','callvan','chat','course_practice','department','facility','owner','real_estate')
    and strpos(coalesce(e.event_label,''),'__')>0
    and e.event_label not in ({% for label in silver_logging_v1_frozen_labels() %}'{{ label }}'{% if not loop.last %},{% endif %}{% endfor %})
    and not exists(select 1 from legacy_labels l where l.platform=e.platform and l.event_name=e.event_name
@@ -149,7 +160,7 @@ mapped as (
        regexp_contains(e.page_location,r'^https?://[^/]+/category(?:[/?#]|$)'),false)
        {% if diagnostic_only %}then cast(null as string)
        {% else %}then error('Silver v1 route contract missing; publication blocked'){% endif %}
-     else fr.funnel_stage end as funnel_stage)
+     else fr.funnel_stage end as funnel_stage),sr.entry_flag as new_entry_flag
  from eligible e
  left join service_rules sr on e.apply_v1 and e.event_label=sr.event_label
    and e.event_name=sr.event_name and e.event_category=sr.event_category and e.platform=sr.platform
@@ -166,8 +177,8 @@ ordered as (
    end else m.step_order end as step_order)
  from mapped m
 )
-select o.* except(apply_v1) replace(
- if(o.apply_v1,coalesce(o.funnel_stage='entry',false),o.is_entry_event) as is_entry_event,
+select o.* except(apply_v1,new_entry_flag) replace(
+ if(o.apply_v1,coalesce(o.new_entry_flag,false),o.is_entry_event) as is_entry_event,
  if(o.apply_v1,coalesce(o.funnel_stage in ('call','search','share','save','read'),false),o.is_core_action) as is_core_action,
  if(o.apply_v1,'service',o.stage_scope) as stage_scope,
  if(o.apply_v1,o.step_order,o.service_step_order) as service_step_order)
