@@ -10,6 +10,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.timetables.trigger import CronTriggerTimetable
 from cosmos import ExecutionConfig, ProfileConfig, ProjectConfig, RenderConfig
 from cosmos.constants import InvocationMode, TestBehavior
+from dbt_ga4_silver_selection import silver_selection, silver_execution_options, validate_stage_silver_environment, v2_only_enabled
 
 DATE_PATTERN = re.compile(r"^\d{8}$")
 
@@ -49,21 +50,15 @@ def create_execution_config() -> ExecutionConfig:
 
 
 def create_render_config(model_tag: str) -> RenderConfig:
-    """최초 적재 완료 전에는 전환 후보를 제외하고 태그 모델을 렌더링한다."""
-    # 테이블 존재만으로는 전체 이력 적재를 보장할 수 없다. 최초 적재가 필요한
-    # 모델은 dbt 태그로 표시하고, 적재·검증 후 배포 환경에서 활성화한다.
-    bootstrap_complete = (
-        os.getenv("KOIN_DATA_SILVER_BOOTSTRAP_COMPLETE", "false").strip().lower()
-        == "true"
-    )
+    """최초 적재 게이트와 Stage V2 전환 설정으로 실행 모델을 선택한다."""
+    selection = silver_selection(model_tag)
     return RenderConfig(
         # 모델 실행 직후 해당 모델의 test를 돌린다. dbt build와 같은 흐름.
         test_behavior=TestBehavior.AFTER_EACH,
         dbt_executable_path=DBT_EXECUTABLE,
         # DAG 파싱 시점의 dbt ls도 별도 프로세스에서 돌린다.
         invocation_mode=InvocationMode.SUBPROCESS,
-        select=[f"tag:{model_tag}"],
-        exclude=[] if bootstrap_complete else ["tag:initial_load_required"],
+        **selection,
     )
 
 
@@ -108,8 +103,9 @@ def create_date_vars(lookback_days: int) -> dict[str, str]:
     }
 
 
-def validate_conf_dates(dag_run: Any = None, **_: Any) -> None:
+def validate_conf_dates(dag_run: Any = None, stage_v2_required: bool = False, **_: Any) -> None:
     """수동 실행 날짜를 dbt에 전달하기 전에 형식과 순서를 검증한다."""
+    validate_stage_silver_environment(require_v2=stage_v2_required)
     conf = (dag_run.conf if dag_run else None) or {}
     start_date, end_date = conf.get("start_date"), conf.get("end_date")
 
@@ -139,4 +135,5 @@ def create_date_validation_task() -> PythonOperator:
     return PythonOperator(
         task_id="validate_dates",
         python_callable=validate_conf_dates,
+        op_kwargs={"stage_v2_required": v2_only_enabled()},
     )

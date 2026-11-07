@@ -3,6 +3,7 @@
 `airflow_daily` 태그 모델을 Cosmos task로 렌더링한다. 기본은 기존
 silver_events만 실행하고, 최초 적재 완료 설정을 켠 뒤에만 전환 후보인
 silver_events_v2, silver__users를 함께 실행한다.
+Stage의 KOIN_DATA_SILVER_V2_ONLY=true에서는 최초 적재 검증 후 두 모델만 실행한다.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from dbt_ga4_common import (
     create_profile_config,
     create_project_config,
     create_render_config,
+    silver_execution_options,
 )
 
 # GA4는 확정 데이터를 최근 며칠에 걸쳐 갱신하므로 매 실행 3일치를 다시 만든다.
@@ -32,11 +34,13 @@ dbt_ga4_daily = DbtDag(
     profile_config=create_profile_config(),
     execution_config=create_execution_config(),
     render_config=create_render_config("airflow_daily"),
-    operator_args={"vars": create_date_vars(DAILY_LOOKBACK_DAYS)},
+    operator_args={"vars": create_date_vars(DAILY_LOOKBACK_DAYS), **silver_execution_options()},
     # 전날 데이터를 KST 오전에 처리한다. GA4 확정 export가 도착할 시간을 준다.
     schedule=create_cron_schedule("0 9 * * *"),
     start_date=pendulum.datetime(2026, 7, 25, tz=SCHEDULE_TIMEZONE),
     catchup=False,
+    # 같은 파티션을 수동/예약 실행이 동시에 교체하지 않게 직렬화한다.
+    max_active_runs=1,
     default_args={
         "retries": 1,
         "retry_delay": timedelta(minutes=5),

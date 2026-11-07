@@ -6023,3 +6023,197 @@ Gold 실행 계약에 main_visit_verified, main_visit_verified_evidence, main_vi
 모든 합성 실행은 Stage asia-northeast3의 SELECT/임시 테이블이며 실제 Silver/Gold 원천을 대체 입력으로 사용하지 않았다. 일반 모델 dry-run은 문법·참조 확인이고 실제 데이터 정확성 검증이 아니다. 초기 개발 중 실패한 구문/파싱 실행은 통과 근거에 포함하지 않는다. 기존 accepted_values 인자 경고는 남아 있다.
 
 PR #31과 #32는 Draft를 유지한다. #32는 #31 브랜치를 대상으로 하며 #31 처리 후 대상 브랜치와 차이를 다시 확인한다. 다음은 새 SDK 수집 이후 실제 적용 기간·플랫폼/버전·메인/가입 증거·Silver User/세션/완전 구간 검증, Stage Gold 수치·비용·공개/실패 복구 검증이다. 운영 Airflow·실제 테이블 공개·GitHub 병합은 수행하지 않는다.
+
+
+### 6.24 Stage Airflow Silver V2/User 전환 준비 (2026-11-06)
+
+사용자는 Airflow에서 기존 silver_events 대신 silver_events_v2와 silver__users를
+갱신하도록 전환하고, 스케줄링 기간은 기존 silver_events와 동일하게 유지하도록
+요청했다. #32 브랜치 위의 별도 feat/stage-silver-v2-airflow에서 구현한다.
+
+- KOIN_DATA_SILVER_V2_ONLY=false가 기본이다. false일 때 기존 모델 선택/운영 동작은
+  유지한다. true이면 daily/monthly 태그와 두 모델명의 교집합으로 V2/User 및 각
+  모델의 테스트만 선택한다. legacy silver_events, Gold, 합성 검사는 제외한다.
+- Stage dev, 출력 koin-stage-438512, GA4/앱 DB 프로젝트 모두 Stage, 원천 데이터셋
+  명시, BOOTSTRAP_COMPLETE=true가 필요하다. 최초 적재 여부는 사람이 실제 이력과
+  입력 검사를 확인한 뒤 설정하며 테이블 존재만으로 켜지 않는다.
+- DAG 파싱 및 첫 validate_dates task에서 환경을 검사한다. V2로 파싱한 DAG의
+  실행 환경이 옵션 false/운영 원천/최초 적재 미완료로 바뀌면 downstream을 차단한다.
+- 일별은 기존 매일 09:00 KST·어제까지 최근 3일이며 수동 start_date/end_date 동작도
+  유지한다. 월별은 기존 매월 1일 12:00·예정일 30일 전~실제 실행일 어제, 당일
+  09시 daily 성공 대기와 reconcile_window=true 정책을 유지한다.
+- V2 선택 옵션과 새 네이밍 매핑 활성화는 별개다. 새 로깅 적용/Gold 인증 플래그를
+  켜지 않는다. 두 Silver 모델은 별도 쓰기이므로 한쪽 실패 시 양쪽 쓰기를 원자적으로
+  롤백한다고 보장하지 않는다. Gold 연결/공개는 이번 변경에 포함하지 않는다.
+- 저장소 dbt ref에서 legacy Event 직접 의존은 찾지 못했다. 외부 Superset/직접 SQL
+  사용처까지 확인한 것은 아니며 legacy 테이블을 삭제/이름 변경하지 않는다.
+
+현재 Stage 테이블 메타데이터 읽기 전용 확인: silver_events_v2 21,593,491행,
+silver__users 57,732행. 두 테이블 모두 주요 Gold 입력 컬럼이 있고 마지막 수정은
+2026-11-03 09:54 KST다. 앱 DB 원천 analytics_427218788.koin_users도 존재(5,827행),
+테이블 마지막 수정은 2025-11-10이다. 이는 메타데이터 관측이며 최초 전체 이력·실제
+로깅·가입 스냅샷 신선도 검증 완료를 뜻하지 않는다. 새 테이블을 무조건 만들거나
+전체 재적재하지 않고, 기존 이력·원천 준비 상태를 먼저 확인한다.
+
+재현 절차·실행 대상·Stage 환경 예시는 airflow/README.md에 기록했다. 실제 Stage
+.env, 최초 적재 완료/V2 플래그, 컨테이너 또는 운영 스케줄은 변경하지 않았다.
+Docker Engine 연결이 없어 실제 Airflow/Cosmos 컨테이너 DAG 파싱·수동 실행은
+별도 검증으로 남긴다. Python 정책/실제 dbt ls/날짜 회귀 검사는 별도로 기록한다.
+
+검증 결과: Python 회귀 45개 모두 통과(실제 dbt ls 선택6개/16호출, 공개 게이트12개,
+월별 날짜7개, 신규 Stage 환경/일별 날짜9개, 기존 Silver 파티션5개, 매핑6개).
+일별·월별 V2 선택은 정확히 두 모델이고 연결 테스트도 두 모델 범위에만 속한다.
+Gold/합성 검사 및 legacy Event는 제외된다. Airflow Python 구문 검사 통과.
+기존 dbt accepted_values 경고/라이브러리 ResourceWarning은 유지하며, 초기 테스트
+경로가 dbt 플러그인 탐색을 방해한 실패는 수정 후 재실행했고 통과 근거에 포함하지
+않는다. 실제 Airflow 컨테이너 DAG 파싱·수동 실행·스케줄 활성화는 아직 수행하지 않았다.
+
+
+### 6.25 Stage 로컬 Airflow 실기동·V2/User 전환 검증 (2026-11-06)
+
+6.24의 Docker 미기동/실행 검증 대기 상태를 이번 절로 갱신한다. 사용자가 Stage
+Airflow 구성·실행과 후속 V2/User 전환을 승인했다. 로컬에서만 별도 메타데이터 DB와
+Airflow3.0.1/Cosmos1.16.0/dbt-core1.12.6/BigQuery1.9.2로 실행했다. 실제 운영 서버,
+Production 테이블, GitHub 병합은 변경하지 않았다. 로컬 계정·환경·Compose는
+Git 제외 파일로 보관하고 비밀값은 문서/PR에 기록하지 않는다.
+
+**입력·기존 실패 확인**
+
+- 처음에는 최초 적재 플래그가 false여서 기존 silver_events만 실행됐다. 사용자
+  화면에서 시작한 예약/수동 실행의 두 unique 검사에서 각각 893건 실패를 확인했다.
+  실패 결과를 무시하거나 성공으로 바꾸지 않고 전환 중 미완료 실행을 종료했다.
+- 기존 V2 21,593,491행은 event_id가 모두 고유하고 필수 분류/날짜 NULL이 없었다.
+  User57,732행도 고유하고 필수값 NULL/역전 시각이 없으며 V2의 사용자 결합 누락0.
+  preflight job_cy6cMDlBFuQCMtPlEAJhHinHdHVj, 실제 dbt 검사15개 PASS.
+- V2 파티션은 2024-07-11~2026-11-01, User최초 관측은 2024-05-03부터 보존돼 있었다.
+  전체 재생성 대신 누락된 2026-11-02~11-05를 명시 범위로 보충했다. 원천 최근5개
+  export와 월별 보정+UTC전날 원천36개가 모두 존재함을 먼저 확인했다.
+
+**전환·실제 실행**
+
+Stage 출력/두 원천 프로젝트를 검증한 후 로컬 BOOTSTRAP_COMPLETE 및
+SILVER_V2_ONLY를 true로 반영하고 API/스케줄러/DAG 프로세서/트리거를 재생성했다.
+일별에는 V2/User 실행·테스트와 validate_dates, 월별에는 동일 모델과 날짜 검증·
+wait_for_daily만 포함된다. 기본 false인 운영 선택 정책은 유지한다.
+
+- 보충 수동 실행 manual__2026-11-06T10:22:02.220652+00:00 성공, V2/User 실행·테스트
+  모두 성공. conf start_date=20261102/end_date=20261105.
+- 기존 오전9시 실행 scheduled__2026-11-06T00:00:00+00:00을 새 DAG 구성으로 clear 후
+  재실행해 성공했다. 이전 legacy task는 Airflow가 removed로 처리했고, V2/User
+  실행·테스트가 실제 성공했다. 원래 오류 로그/이력은 보존했다.
+- 월별 scheduled__2026-11-01T03:00:00+00:00도 날짜 검증부터 재실행해 성공했다.
+  실제 실행일인 11월6일 오전9시 daily 성공을 기다린 뒤 10월2일~11월5일을
+  reconcile_window=true로 보정했다. 센서 조건/기간을 우회하지 않았다.
+- 두 DAG는 Stage에서 활성 상태다. 매일09시/최근3일, 매월1일12시/기존30일 보정
+  정책은 유지한다. 같은 파티션의 수동/예약 쓰기가 겹치지 않도록 daily에도
+  max_active_runs=1을 추가했다. 이는 실행 동시성 제한이며 주기/기간 변경이 아니다.
+
+**사후 검증과 범위**
+
+최근 이벤트: 11월2일342행,3일512행,4일139행,5일242행. 각 날짜 event_id가 모두
+고유하다. 보정한 10월2일~11월5일 이벤트의 사용자 결합 누락0. User57,940행과
+고유 키57,940개가 같고 최초 관측2024-05-03은 보존, 마지막 관측2026-11-05
+23:59:04.274001로 갱신됐다. job_6K6YN_QZSsojQVN1dcoXaKA4DPLz.
+
+Python 전체 회귀46개 통과(기존45+일별 직렬화1). 실제 Airflow 로그인·건강 상태,
+DAG 로딩 오류0, 두 모델의 실제 쓰기/테스트, 재실행, 월별 daily 대기를 확인했다.
+처음 전환하면서 종료한 legacy 수동 실행은 실패 이력으로 남아 있다. 기존 legacy
+테이블 중복 자체를 복구했다는 의미는 아니며 전환 후 실행 대상에서 제외했다.
+
+V2/User 갱신 성공은 새 SDK 배포·네이밍 매핑 활성화나 Gold 공개 승인이 아니다.
+새 로깅 매핑 및 Gold 인증 플래그는 비활성 상태이고, 앱 DB 원천의 최신성·실제
+메인/가입 관측·수집 완전 구간·Gold 수치/비용/공개 복구는 여전히 별도 검증이다.
+
+사후 전체 Event는20,692,264행이다. 전환 전21,593,491행과의 차이는 월별 검증 범위의
+기존913,333행이 Stage 계산12,106행으로 바뀐 결과다. Stage 원시 이벤트는 같은
+구간12,113행이며 정제 모델·unique 검사를 통과했다. time travel 대조에서 변경일35개,
+요청 구간 밖 변경0일을 확인했다(job_Ol4imBms3L_Zrqc9_qYOgIkHy6WU).
+기존 적재 job2c1f5841-1d3d-48c0-81a7-53f9daa5f4f7의 referencedTables가
+kap-chat.analytics_432041405였음을 확인했다. 현재 실행 원천은 Stage다. 따라서
+범위 밖에 남은 과거 운영 원천 기반 이력과 최근 Stage 원천을 같은 모집단이라고
+가정하지 않는다. Gold 이력 비교/완전 구간 승인 전 출처 정합성 검증이 필요하다.
+해당 범위 밖 데이터 복구/재생성이나 Production 조회·쓰기는 수행하지 않았다.
+
+
+### 6.26 승인 원천 복구·User Snapshot 재계산·DAG 공통 쓰기 제어 (2026-11-06)
+
+사용자는 운영 원천 읽기→Stage 출력 방식으로 출처를 통일하고 Event와 User를
+함께 복구하도록 승인했다. 먼저 두 Stage DAG를 중지했다. 코드 버전d7ecba3,
+당시 원천/프로파일/기간 설정을 보존하고 현재 Event/User 및 혼합 전10:20UTC의
+Event/User Snapshot을 각각 만들었다(4개,7일 만료). 원본 실행 이력은 보존했다.
+Production 쓰기와 GitHub 병합은 하지 않는다.
+
+**출력과 원천 계약 분리**
+
+출력 프로젝트는 반드시 koin-stage-438512이고 프로파일은 dev다. GA4/앱 DB 원천은
+별도 KOIN_DATA_SILVER_SOURCE_CONTRACT JSON에 프로젝트·데이터셋4개 및 evidence를
+명시하고 실행 환경이 정확히 일치해야 한다. 이번 승인 원천은 두 source 모두
+kap-chat.analytics_432041405다. 출력까지 운영으로 바꾸거나 명시 계약 없이
+묵시적 기본 원천을 사용하는 것은 차단한다. 기존 Stage 원천 강제 정책을 대체한다.
+원천 계약/출력 제한의 성공·실패 회귀 검사를 추가했다.
+
+**Event/User 후보와 공동 복구**
+
+- Event는 변경된2026-10-02~11-05의35일만 승인 원천에서 재계산해 후보를 만들었다.
+- User는 MERGE 영향을 되돌리기 위해 혼합 전 Snapshot57732명을 기존 상태로 삼아
+  승인 원천으로 재계산했다. 현재57940명을 그대로 MERGE 입력으로 쓰지 않았다.
+- Stage 원천 작업으로 추가됐던208명 중 승인 원천에도 있는3명을 제외한205명은
+  후보에서 제거됐다. 승인 원천의 새 사용자412명을 반영해 후보58144명이 됐다.
+  혼합 전 기준 기존 사용자 변경은 Stage작업2198명, 승인 원천 후보2156명이다.
+- 속성별 비교에서 Stage작업으로 달라졌던 user_type1960건, signup_completed_at2169건,
+  is_deleted/is_mysql_mapped각1628건은 승인 원천 후보에서 혼합 전 값으로 돌아왔다.
+  first_seen_at9건도 복구됐다. 신규 관측에 따른 last_seen/지원 수/대표ID 등은
+  승인 원천 계산 결과를 사용하고 과거 행 수/속성을 억지로 맞추지 않았다.
+- 후보 generic15개+관계/범위/기존 User기간 보존3개 검사 모두 통과한 후 Stage의
+  35일 Event 교체와 User 전체 후보 교체를 하나의 트랜잭션으로 반영했다.
+  반영 전 동시 변경이 없는지 검사하고 commit 전 전체Event→User 관계도 검사했다.
+
+후보 Event1072813행, User58144행. 기존에 존재했던10월2일~11월1일의 Event는
+모두 후보와 같은 키/내용으로 복구됐고, 현재 승인 원천 재계산에서 새 키426개가
+추가 관측됐다. 기존 키 삭제/동일 키 내용 변경은0이다. 범위 밖은 날짜별 건수와
+전체 행 지문을 비교해 변경0일을 확인했다. 따라서 과거 건수와 같다는 이유만으로
+복구를 판단하지 않았다. source-repair Snapshot/후보는 Stage silver에만 생성했다.
+
+**DAG 간 쓰기 제어**
+
+Stage V2모드에서 daily/monthly의 모든 dbt실행·테스트 task에 같은
+koin_stage_silver_writes pool과pool_slots=1을 적용했다. 실제 Airflow pool도1slot이다.
+날짜 검증과 daily성공 대기 센서는 pool밖에 둔다. 같은 DAG내 max_active_runs=1과
+함께 사용하며, 일별·월별·수동 dbt쓰기 사이의 동시 실행을 막는다. 개별 task단위
+직렬화이므로 전체DAG가 한꺼번에 락을 보유하는 것은 아니고 두 모델의 통상 갱신을
+원자적으로 만든 것도 아니다. 직접CLI/BigQuery 복구는 이 pool밖이므로 DAG중지 후
+진행 중 쓰기가 없는 상태에서만 수행해야 한다.
+
+스케줄은 일별09시/최근3일, 월별1일12시/기존30일보정으로 유지했다. 새 로깅 매핑과
+Gold공개 플래그는 비활성이다. Production최초 적재·운영선택정책·리뷰/병합은 별도다.
+
+**검증 완료 결과**
+
+Python 전체49개 통과. 실제 운영 원천→Stage 경로에서09시 예약 재실행과 일별/월별
+수동 실행을 동시에 제출했다. 세 실행 모두 성공했고 공통pool의 dbt task12개의
+실제 시작/종료 구간을 비교해 겹침0건(서로 다른DAG간 겹침도0건)을 확인했다.
+월별은 실제09시daily성공을 기다렸으며 센서는쓰기pool밖에서 대기했다. Stage의
+두 스케줄은 기존 주기대로 복구했고 Production은 변경하지 않았다.
+
+최종 Event21,752,971행, User58,144행/고유키58,144개. User 최초 관측2024-05-03은
+보존됐고 마지막 관측은 승인원천의2026-11-05 23:58:30.714039이다. 보정35일의
+Event→User결합 누락0, 복구후 가입/유형/삭제/매핑 속성과 승인후보 불일치0.
+job_LbscFebWXCbkizx9dhnwoVxIHWuF. 이는 Gold 공개 승인이 아니다.
+
+근거: Snapshot job_QaoGUZcYj1AVBleyy0a3KrMH6MgJ,
+Event후보 job_0otKB109WCS4alW9aXYE4NlUTzPS,
+User후보 job_zaca9DiJ9yoect_zQOdjeXyVcgfn,
+후보검사 job_9eyrQ2pHomsbJAFyZbbW_2lJWWh9,
+User차이 job_Mh4xSoEp6lHCQpen1NJBDUwp9-xL,
+속성비교 job_FwCN6o0GUfsTci2BNdv3JbUq75tb,
+공동복구 job_qjYb-gH0f8_A5IZNAdJK-hhTTrIP,
+범위밖지문 job_HmSGzJRu3qx-89ZWX701YjLA20Ez,
+기존행비교 job_N5Vd3yIQm47N56fkgj5FzH3qtjDo.
+수동실행은 daily manual__2026-11-06T11:00:42.933699+00:00,
+monthly manual__2026-11-06T11:00:42.650786+00:00이며 실행·검사 모두success다.
+복구 전/혼합 전 Snapshot과 후보는7일 만료로 보존한다.
+
+Production 준비 시에는 현재 Stage전용 V2옵션을 그대로 운영에서 켜지 않는다.
+운영 두 테이블 존재/초기 범위/비용을 다시 확인하고 최초 적재와 품질 검사를 먼저
+수행해야 한다. 운영용 모델선택·공통쓰기pool과 기존silver_events 사용처 전환을
+별도로 검토한 뒤 운영스케줄을 변경한다. 이 작업에서 운영쓰기/병합은 하지 않았다.

@@ -64,7 +64,10 @@ class MonthlyDatesTests(unittest.TestCase):
     def test_actual_dag_templates_share_window_and_reject_stale_retry(self):
         tree = ast.parse((DAGS / "dbt_ga4_monthly.py").read_text(encoding="utf-8"))
         dag = next(node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "DbtDag")
-        args = ast.literal_eval(next(kw.value for kw in dag.keywords if kw.arg == "operator_args"))
+        expression = next(kw.value for kw in dag.keywords if kw.arg == "operator_args")
+        # Date templates are literal fields; pool options are evaluated separately.
+        args = ast.literal_eval(ast.Dict(keys=[k for k in expression.keys if k is not None],
+                    values=[v for k,v in zip(expression.keys,expression.values) if k is not None]))
         window = self.prepare(date(2026, 9, 5))
         ti = SimpleNamespace(xcom_pull=lambda **_: window)
         env = Environment(undefined=StrictUndefined)
